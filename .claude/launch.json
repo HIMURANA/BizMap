@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "exports",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [".claude/serve-exports.mjs"],
+      "port": 4173
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "app:api"],
+      "port": 8787
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "app:web"],
+      "port": 5173
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+@import "tailwindcss";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+@theme {
+  --font-sans: "Inter", "Hind Siliguri", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dbe7ff;
+  --color-brand-500: #3b6cf6;
+  --color-brand-600: #2754e6;
+  --color-brand-700: #1f43c4;
+}
+
+html, body, #root { height: 100%; }
+body { @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100; }
+:lang(bn) body, .bn { font-family: "Hind Siliguri", "Inter", sans-serif; }
+
+/* thin scrollbars inside panels */
+.scroll-thin { scrollbar-width: thin; scrollbar-color: rgb(148 163 184 / .5) transparent; }
+
+.maplibregl-popup-content { @apply rounded-lg px-3 py-2 text-sm shadow-lg dark:bg-slate-800 dark:text-slate-100; }

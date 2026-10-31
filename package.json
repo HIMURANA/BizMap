@@ -1,0 +1,53 @@
+{
+  "name": "dhaka-business-discovery",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Business discovery & data collection system for Dhaka, Bangladesh, using OpenStreetMap (Overpass) as the primary geographic source and Firecrawl for public website enrichment.",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "cli": "tsx src/cli.ts",
+    "init-db": "tsx src/cli.ts init-db",
+    "resolve-boundaries": "tsx src/cli.ts resolve-boundaries",
+    "assign-areas": "tsx src/cli.ts assign-areas",
+    "enrich-sample": "tsx src/cli.ts enrich-sample",
+    "resolve-city": "tsx src/cli.ts resolve-city",
+    "extract-local": "tsx src/cli.ts extract-local",
+    "import-local": "tsx src/cli.ts import-local",
+    "web-discover": "tsx src/cli.ts web-discover",
+    "enrich-batch": "tsx src/cli.ts enrich-batch",
+    "resolve-admin": "tsx src/cli.ts resolve-admin",
+    "assign-admin": "tsx src/cli.ts assign-admin",
+    "load-population": "tsx src/cli.ts load-population",
+    "overture-test": "tsx src/cli.ts overture-test",
+    "import-overture": "tsx src/cli.ts import-overture",
+    "overture-sample": "tsx src/cli.ts overture-sample",
+    "import-adlibrary": "tsx src/cli.ts import-adlibrary",
+    "quality": "tsx src/cli.ts quality",
+    "build-search": "tsx src/cli.ts build-search",
+    "export": "node --max-old-space-size=8192 --import tsx src/cli.ts export",
+    "discover": "tsx src/cli.ts discover",
+    "pilot": "tsx src/cli.ts pilot",
+    "stats": "tsx src/cli.ts stats",
+    "typecheck": "tsc --noEmit",
+    "app:api": "tsx apps/api/server.ts",
+    "app:web": "npm --prefix apps/web run dev",
+    "app:build": "npm --prefix apps/web run build",
+    "pg:sync": "tsx apps/api/sync.ts",
+    "pg:population": "node --max-old-space-size=4096 --import tsx apps/api/loadPopulationGrid.ts"
+  },
+  "dependencies": {
+    "nodemailer": "^10.3.1",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
+    "geotiff": "^3.0.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

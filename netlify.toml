@@ -1,0 +1,24 @@
+# Netlify hosts only the React app (apps/web). Every /api/* request is forwarded to the BizMap API on the Windows server,
+# so the browser sees a single site: login cookies, CSRF checks, unsubscribe links and payment callbacks keep working.
+# Replace api.yourcompany.com with the HTTPS address of your API server (see HANDOFF.md, "Deploy: Netlify + Windows Server").
+
+[build]
+  base = "apps/web"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+# API: forwarded to the Windows server (must be HTTPS so passwords and cookies are encrypted on the way)
+[[redirects]]
+  from = "/api/*"
+  to = "https://api.yourcompany.com/api/:splat"
+  status = 200
+  force = true
+
+# Single-page app: every other path loads the React app, which picks the page from the URL
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# local database & caches
+data/db/*.sqlite
+data/db/*.sqlite-*
+data/cache/
+.firecrawl/
+
+# exports (generated)
+data/exports/
+
+# logs
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+data/osm-extract/
+data/*.log
+data/overture/
+data/tools/
+data/population/
+
+# hand-collected F-commerce lists (may contain personal phone numbers)
+data/fcommerce/*.csv
+!data/fcommerce/ad_library_collection_template.csv
+
+# SaaS app exports (customer files)
+data/app_exports/
+data/population_grid/
