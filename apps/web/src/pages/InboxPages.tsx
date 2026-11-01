@@ -131,7 +131,7 @@ function ThreadView({ id, onBack }: { id: string; onBack: () => void }) {
         ) : (
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <Lock className="size-3.5" /><span className="flex-1">The 24-hour reply window is closed (or they have not written yet). WhatsApp only allows an approved template{t.consent ? '' : ', and only after an opt-in'}.</span>
-            <Button size="sm" disabled={!t.consent} onClick={() => setTplOpen(true)}>Send template</Button>
+            <Button size="sm" onClick={() => setTplOpen(true)}>Send template</Button>
           </div>
         )}
         {t.window_open && t.window_closes_at && <p className="mt-1 text-[10px] text-slate-400">Free replies allowed until {new Date(t.window_closes_at).toLocaleString()}.</p>}

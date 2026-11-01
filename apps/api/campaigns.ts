@@ -46,8 +46,10 @@ async function audience(ws: string, channel: 'email' | 'whatsapp', listId: strin
   const rows = await q<{ id: string; name: string; email: string | null; email_status: string | null; phone: string | null; area: string | null; district: string | null; label: string }>(
     `SELECT b.id, b.name, b.email, b.email_status, b.phone, b.area, b.district, c.label FROM biz b JOIN biz_categories c ON c.id = b.cat ${where} LIMIT 50000`, params);
   const suppressed = new Set((await q<{ value: string }>(`SELECT lower(value) AS value FROM suppressions WHERE workspace_id = $1`, [ws])).map((r) => r.value));
-  const consented = channel === 'whatsapp'
-    ? new Set((await q<{ address: string }>(`SELECT address FROM consents WHERE workspace_id = $1 AND channel = 'whatsapp' AND revoked_at IS NULL`, [ws])).map((r) => r.address))
+  // No opt-in required; only numbers that opted out (STOP / revoked) are excluded.
+  const optedOut = channel === 'whatsapp'
+    ? new Set((await q<{ address: string }>(`SELECT address FROM consents k WHERE workspace_id = $1 AND channel = 'whatsapp' AND revoked_at IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM consents n WHERE n.workspace_id = k.workspace_id AND n.channel = 'whatsapp' AND n.address = k.address AND n.revoked_at IS NULL)`, [ws])).map((r) => r.address))
     : null;
   const out: Audience = { eligible: [], excluded: { no_address: 0, suppressed: 0, no_consent: 0, duplicate: 0 } };
   const seen = new Set<string>();
@@ -57,7 +59,7 @@ async function audience(ws: string, channel: 'email' | 'whatsapp', listId: strin
     if (seen.has(addr)) { out.excluded.duplicate++; continue; }
     seen.add(addr);
     if (suppressed.has(addr) || (r.phone && suppressed.has(r.phone.toLowerCase()))) { out.excluded.suppressed++; continue; }
-    if (consented && !consented.has(addr)) { out.excluded.no_consent++; continue; }
+    if (optedOut && optedOut.has(addr)) { out.excluded.no_consent++; continue; }
     out.eligible.push({ biz_id: r.id, name: r.name, address: addr,
       merge: { name: r.name, category: r.label, area: r.area ?? r.district?.replace(/ District$/, '') ?? '', district: r.district?.replace(/ District$/, '') ?? '' } });
   }
@@ -116,8 +118,9 @@ export async function processCampaigns(): Promise<void> {
           const m = await composeEmail(c.workspace_id, c, r.address, r.merge);
           providerId = (await sendMail({ workspaceId: c.workspace_id, kind: 'campaign', to: r.address, ...m })).id;
         } else {
-          const consent = await one(`SELECT 1 FROM consents WHERE workspace_id = $1 AND channel = 'whatsapp' AND address = $2 AND revoked_at IS NULL`, [c.workspace_id, r.address]);
-          if (!consent) { await q(`UPDATE campaign_recipients SET status = 'skipped', reason = 'opt-in revoked', updated_at = now() WHERE id = $1`, [r.id]); continue; }
+          const optedOut = await one(`SELECT 1 FROM consents k WHERE workspace_id = $1 AND channel = 'whatsapp' AND address = $2 AND revoked_at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM consents n WHERE n.workspace_id = k.workspace_id AND n.channel = 'whatsapp' AND n.address = k.address AND n.revoked_at IS NULL)`, [c.workspace_id, r.address]);
+          if (optedOut) { await q(`UPDATE campaign_recipients SET status = 'skipped', reason = 'opted out', updated_at = now() WHERE id = $1`, [r.id]); continue; }
           const params = (c.wa_params ?? []).map((p) => render(p, r.merge));
           providerId = await sendWaTemplate(c.workspace_id, r.address, c.wa_template, c.wa_language, params, { campaignId: c.id, bizId: r.biz_id, name: r.merge.name ?? null });
         }
@@ -272,7 +275,7 @@ on('POST', '/api/campaigns/:id/launch', async ({ req, m, ctx }) => {
     if ((await waConfig(ctx.workspaceId)).mode === 'disabled') throw new HttpError(400, 'Connect WhatsApp in Settings → Sending first.');
   }
   const pv = await preview(c, ctx.workspaceId);
-  if (!pv.eligible) throw new HttpError(400, c.channel === 'whatsapp' ? 'No recipient has a recorded WhatsApp opt-in.' : 'No recipient has a usable email address.');
+  if (!pv.eligible) throw new HttpError(400, c.channel === 'whatsapp' ? 'No recipient has a valid Bangladeshi mobile number (or all opted out).' : 'No recipient has a usable email address.');
   const sendAt = typeof b.send_at === 'string' && !Number.isNaN(Date.parse(b.send_at)) ? new Date(b.send_at) : null;
   await tx(async (t) => {
     await t.query(`SELECT id FROM workspaces WHERE id = $1 FOR UPDATE`, [ctx.workspaceId]);

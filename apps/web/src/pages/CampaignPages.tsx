@@ -220,7 +220,7 @@ function Editor({ initial, id }: { initial: Draft; id?: string }) {
             <div className="text-2xl font-semibold tabular-nums">{preview.eligible.toLocaleString()} <span className="text-sm font-normal text-slate-500">recipients</span></div>
             <ul className="space-y-0.5 text-xs text-slate-500">
               {preview.excluded.no_address > 0 && <li>{preview.excluded.no_address.toLocaleString()} without {d.channel === 'email' ? 'email' : 'a mobile number'}</li>}
-              {preview.excluded.no_consent > 0 && <li>{preview.excluded.no_consent.toLocaleString()} without WhatsApp opt-in</li>}
+              {preview.excluded.no_consent > 0 && <li>{preview.excluded.no_consent.toLocaleString()} opted out</li>}
               {preview.excluded.suppressed > 0 && <li>{preview.excluded.suppressed.toLocaleString()} on your do-not-contact list</li>}
               {preview.excluded.duplicate > 0 && <li>{preview.excluded.duplicate.toLocaleString()} duplicate addresses</li>}
             </ul>
