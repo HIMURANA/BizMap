@@ -31,6 +31,7 @@ export function normalizeWaPhone(phone: string | null | undefined): string | nul
   let d = phone.replace(/\D/g, '');
   if (d.startsWith('00')) d = d.slice(2);
   if (d.length === 11 && d.startsWith('01')) d = `88${d}`;
+  if (d.length === 10 && d.startsWith('1')) d = `880${d}`; // Excel drops the leading 0 of numbers stored as numbers
   return /^8801[3-9]\d{8}$/.test(d) ? d : null;
 }
 

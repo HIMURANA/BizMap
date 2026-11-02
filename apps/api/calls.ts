@@ -3,11 +3,14 @@
  * Outcomes feed back into the data: wrong number / closed / not a business become data reports, "do not call" goes on
  * the suppression list, no-answer retries up to 3 times. Calls are only offered inside the workspace's calling hours
  * (Asia/Dhaka). A verbal WhatsApp opt-in given on the call can be recorded with its proof.
+ * Besides directory businesses a queue can hold the workspace's own contacts (from a list, or typed/imported into the queue);
+ * outcomes for those never become data reports, because there is no directory record to correct.
  */
 import { one, q, tx } from './db.js';
 import { buildFilter } from './filters.js';
 import { HttpError, body, need, on, str } from './http.js';
 import { settings } from './campaigns.js';
+import { cleanContacts, isBizId } from './contacts.js';
 import { normalizeWaPhone } from './whatsapp.js';
 
 export const OUTCOMES = ['interested', 'callback', 'not_interested', 'no_answer', 'wrong_number', 'closed', 'not_a_business', 'do_not_call'] as const;
@@ -41,12 +44,18 @@ on('POST', '/api/calls/queues', async ({ req, ctx }) => {
   const b = await body(req);
   const name = str(b.name, 120);
   if (!name) throw new HttpError(400, 'Give the queue a name.');
-  let where: string, params: unknown[];
+  let where: string | null = null, params: unknown[] = [];
   const listId = str(b.list_id, 40);
   if (listId) { where = `WHERE b.id IN (SELECT i.biz_id FROM list_items i JOIN lists l ON l.id = i.list_id WHERE l.id::text = $1 AND l.workspace_id = $2)`; params = [listId, ctx.workspaceId]; }
-  else { const f = buildFilter(new URLSearchParams(typeof b.query === 'string' ? b.query : ''), ctx.workspaceId); where = f.where; params = f.params; }
-  const rows = await q<{ id: string; name: string; phone: string; district: string | null }>(
+  else if (typeof b.query === 'string') { const f = buildFilter(new URLSearchParams(b.query), ctx.workspaceId); where = f.where; params = f.params; }
+  // no list and no filter: only the typed/imported numbers (an empty filter would mean "every business")
+  const rows = where === null ? [] : await q<{ id: string; name: string; phone: string; district: string | null }>(
     `SELECT b.id, b.name, b.phone, b.district FROM biz b ${where ? `${where} AND` : 'WHERE'} b.phone IS NOT NULL AND b.phone_status IS DISTINCT FROM 'invalid' ORDER BY b.district, b.area, b.name LIMIT 5000`, params);
+  if (listId) rows.push(...await q<{ id: string; name: string; phone: string; district: string | null }>(
+    `SELECT 'contact:' || c.id AS id, COALESCE(c.name, c.company, c.phone) AS name, c.phone, c.district FROM list_contacts c JOIN lists l ON l.id = c.list_id
+     WHERE l.id::text = $1 AND l.workspace_id = $2 AND c.phone IS NOT NULL ORDER BY c.district, c.area, c.name LIMIT 5000`, [listId, ctx.workspaceId]));
+  for (const c of cleanContacts(b.contacts).contacts) if (c.phone) rows.push({ id: `manual:${c.phone}`, name: c.name ?? c.company ?? c.phone, phone: c.phone, district: c.district });
+  if (rows.length > 5000) rows.length = 5000;
   const suppressed = new Set((await q<{ value: string }>(`SELECT value FROM suppressions WHERE workspace_id = $1`, [ctx.workspaceId])).map((r) => r.value.replace(/\D/g, '')));
   const seen = new Set<string>();
   const items = rows.filter((r) => {
@@ -55,7 +64,7 @@ on('POST', '/api/calls/queues', async ({ req, ctx }) => {
     seen.add(digits);
     return true;
   });
-  if (!items.length) throw new HttpError(400, 'None of these businesses has a usable phone number that is not on your do-not-contact list.');
+  if (!items.length) throw new HttpError(400, 'Nobody here has a usable phone number that is not on your do-not-contact list.');
   const id = await tx(async (c) => {
     const qid = (await c.query(`INSERT INTO call_queues (workspace_id, name, script, created_by) VALUES ($1, $2, $3, $4) RETURNING id`, [ctx.workspaceId, name, str(b.script, 5000) || null, ctx.userId])).rows[0].id as string;
     await c.query(`INSERT INTO call_items (queue_id, biz_id, phone, name) SELECT $1, * FROM unnest($2::text[], $3::text[], $4::text[]) ON CONFLICT DO NOTHING`,
@@ -104,13 +113,24 @@ on('POST', '/api/calls/queues/:id/next', async ({ m, ctx }) => {
        LIMIT 1 FOR UPDATE SKIP LOCKED)
      RETURNING id, biz_id, phone, name, status, attempts, notes, callback_at`, [qu.id, ctx.userId]);
   if (!item) return { item: null, outside_hours: false, done: true };
+  // typed/imported into the queue, or a list contact that was deleted since: only what the queue item itself knows
+  const bare = { id: item.biz_id, name: item.name, cat: null, cat_label: '', area: null, upazila: null, district: null, phone: item.phone, phone_status: 'own contact',
+    email: null, website: null, facebook: null, lat: null, lon: null, own: true };
+  const contactId = item.biz_id.startsWith('contact:') ? item.biz_id.slice(8) : null;
   const [biz, history] = await Promise.all([
-    one(`SELECT b.id, b.name, b.cat, c.label AS cat_label, b.area, b.upazila, b.district, b.phone, b.phone_status, b.email, b.website, b.facebook, b.lat, b.lon
-         FROM biz b JOIN biz_categories c ON c.id = b.cat WHERE b.id = $1`, [item.biz_id]),
+    isBizId(item.biz_id)
+      ? one(`SELECT b.id, b.name, b.cat, c.label AS cat_label, b.area, b.upazila, b.district, b.phone, b.phone_status, b.email, b.website, b.facebook, b.lat, b.lon
+           FROM biz b JOIN biz_categories c ON c.id = b.cat WHERE b.id = $1`, [item.biz_id])
+      // own contact: same shape, so the call screen works unchanged (own = no directory page to link to)
+      : contactId
+        ? one(`SELECT 'contact:' || c.id AS id, COALESCE(c.name, c.company, c.phone) AS name, NULL AS cat, COALESCE(c.company, '') AS cat_label, c.area, NULL AS upazila, c.district,
+             c.phone, 'own contact' AS phone_status, c.email, NULL AS website, NULL AS facebook, NULL::float AS lat, NULL::float AS lon, c.note, true AS own
+             FROM list_contacts c JOIN lists l ON l.id = c.list_id WHERE c.id::text = $1 AND l.workspace_id = $2`, [contactId, ctx.workspaceId])
+        : Promise.resolve(null),
     q(`SELECT i.outcome, i.notes, i.called_at, cq.name AS queue FROM call_items i JOIN call_queues cq ON cq.id = i.queue_id
        WHERE cq.workspace_id = $1 AND i.biz_id = $2 AND i.called_at IS NOT NULL AND i.id <> $3 ORDER BY i.called_at DESC LIMIT 5`, [ctx.workspaceId, item.biz_id, item.id]),
   ]);
-  return { item, biz, history, script: qu.script, hours: { start: s.call_hours_start, end: s.call_hours_end, now: hour } };
+  return { item, biz: biz ?? (isBizId(item.biz_id) ? null : bare), history, script: qu.script, hours: { start: s.call_hours_start, end: s.call_hours_end, now: hour } };
 });
 
 on('POST', '/api/calls/items/:id/outcome', async ({ req, m, ctx }) => {
@@ -135,7 +155,7 @@ on('POST', '/api/calls/items/:id/outcome', async ({ req, m, ctx }) => {
       called_by = $6, called_at = now(), locked_by = NULL, locked_at = NULL WHERE id = $1`, [item.id, status, outcome, notes, callbackAt, ctx.userId]);
     // feed what the caller learned back into the data
     const report = ({ wrong_number: 'wrong_phone', closed: 'closed', not_a_business: 'not_a_business' } as Record<string, string>)[outcome];
-    if (report) await c.query(`INSERT INTO data_reports (biz_id, kind, note, workspace_id, user_id) VALUES ($1, $2, $3, $4, $5)`, [item.biz_id, report, `From a call${notes ? `: ${notes}` : ''}`, ctx.workspaceId, ctx.userId]);
+    if (report && isBizId(item.biz_id)) await c.query(`INSERT INTO data_reports (biz_id, kind, note, workspace_id, user_id) VALUES ($1, $2, $3, $4, $5)`, [item.biz_id, report, `From a call${notes ? `: ${notes}` : ''}`, ctx.workspaceId, ctx.userId]);
     if (outcome === 'do_not_call') {
       await c.query(`INSERT INTO suppressions (workspace_id, value, channel, reason) VALUES ($1, $2, 'phone', 'asked not to be called') ON CONFLICT (workspace_id, value) DO NOTHING`, [ctx.workspaceId, item.phone.replace(/\D/g, '')]);
       await c.query(`UPDATE call_items SET status = 'skipped', outcome = 'do_not_call' WHERE status IN ('pending', 'callback') AND regexp_replace(phone, '\\D', '', 'g') = $2
@@ -147,7 +167,7 @@ on('POST', '/api/calls/items/:id/outcome', async ({ req, m, ctx }) => {
       if (!wa) throw new HttpError(400, 'This is not a Bangladeshi mobile number, so it cannot be used for WhatsApp.');
       const exists = (await c.query(`SELECT 1 FROM consents WHERE workspace_id = $1 AND channel = 'whatsapp' AND address = $2 AND revoked_at IS NULL`, [ctx.workspaceId, wa])).rowCount;
       if (!exists) await c.query(`INSERT INTO consents (workspace_id, channel, address, biz_id, method, proof, recorded_by) VALUES ($1, 'whatsapp', $2, $3, 'call_verbal', $4, $5)`,
-        [ctx.workspaceId, wa, item.biz_id, `Agreed on a call on ${new Date().toISOString()} (logged by ${ctx.name})${notes ? `: ${notes}` : ''}`, ctx.userId]);
+        [ctx.workspaceId, wa, isBizId(item.biz_id) ? item.biz_id : null, `Agreed on a call on ${new Date().toISOString()} (logged by ${ctx.name})${notes ? `: ${notes}` : ''}`, ctx.userId]);
     }
   });
   return { ok: true, status };

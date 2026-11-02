@@ -30,6 +30,8 @@ export async function sendMail(m: Mail): Promise<{ id: string | null; mode: type
   }
   try {
     const info = await transport!.sendMail({ from: m.from ?? DEFAULT_FROM, to: m.to, replyTo: m.replyTo, subject: m.subject, text: m.text, html: m.html, headers: m.headers });
+    // "sent" here only means the SMTP server accepted the message; a recipient it refused is a failure
+    if (info.rejected?.length) throw new Error(`Recipient refused by the mail server: ${String(info.response ?? '').slice(0, 200)}`);
     await q(`INSERT INTO email_log (workspace_id, kind, to_addr, subject, body_text, mode, status, provider_id) VALUES ($1, $2, $3, $4, $5, 'smtp', 'sent', $6)`,
       [m.workspaceId, m.kind, m.to, m.subject, m.text, info.messageId ?? null]);
     return { id: info.messageId ?? null, mode: MAIL_MODE };

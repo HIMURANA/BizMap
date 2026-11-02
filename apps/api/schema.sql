@@ -280,3 +280,30 @@ CREATE TABLE IF NOT EXISTS alert_runs (
   run_at timestamptz NOT NULL DEFAULT now(), since text NOT NULL, new_count int NOT NULL, sample jsonb NOT NULL DEFAULT '[]', seen boolean NOT NULL DEFAULT false
 );
 CREATE INDEX IF NOT EXISTS alert_runs_alert_idx ON alert_runs (alert_id, run_at DESC);
+
+-- ------------------------------------------------------------------ own contacts (typed in or imported from Excel/CSV)
+-- people and businesses the workspace brings itself; they live in a list next to directory businesses (list_items)
+CREATE TABLE IF NOT EXISTS list_contacts (
+  id bigserial PRIMARY KEY,
+  list_id uuid NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+  name text, company text, phone text, email text, area text, district text, note text,
+  source text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'import')),
+  added_by uuid REFERENCES users(id) ON DELETE SET NULL, added_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS list_contacts_dedupe_idx ON list_contacts (list_id, coalesce(phone, ''), coalesce(email, ''));
+-- extra recipients typed or imported straight into a campaign (same shape as list_contacts, without ids)
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS audience_contacts jsonb NOT NULL DEFAULT '[]';
+
+-- ------------------------------------------------------------------ automated voice calls (voice.ts)
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS voice_name text;
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_channel_check;
+ALTER TABLE campaigns ADD CONSTRAINT campaigns_channel_check CHECK (channel IN ('email', 'whatsapp', 'voice'));
+-- the synthesized audio played on the call (data/voice_audio/<media>.mp3); the spoken text is kept in merge._speech
+ALTER TABLE campaign_recipients ADD COLUMN IF NOT EXISTS media text;
+-- own recordings ("custom voice"): 8 kHz mono WAV made in the browser, stored as data/voice_audio/<id>.wav (id = content hash)
+CREATE TABLE IF NOT EXISTS voice_clips (
+  id text NOT NULL, workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name text NOT NULL, seconds real NOT NULL, created_by uuid REFERENCES users(id) ON DELETE SET NULL, created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (workspace_id, id)
+);
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS voice_clip text; -- set: this recording is played instead of the text-to-speech message

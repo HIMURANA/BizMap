@@ -5,6 +5,7 @@ import { out, type WaTemplate } from '../lib/outreach';
 import { Link, navigate, useLocation } from '../lib/router';
 import { Badge, Button, Empty, Modal, Spinner, cx } from '../components/ui';
 import { Page, TestModeBanner } from './CampaignPages';
+import { confirmAction } from '../components/feedback';
 
 const card = 'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
 const input = 'h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900';
@@ -190,7 +191,7 @@ function OptIns() {
                 <td className="text-xs">{METHOD_LABEL[c.method] ?? c.method}<div className="text-slate-400">{new Date(c.created_at).toLocaleDateString()}{c.recorded_by ? ` · ${c.recorded_by}` : ''}</div></td>
                 <td className="hidden max-w-64 truncate text-xs text-slate-500 md:table-cell" title={c.proof}>{c.proof}</td>
                 <td>{c.revoked_at ? <Badge tone="rose" title={c.revoked_reason ?? ''}>revoked</Badge> : <Badge tone="green">active</Badge>}</td>
-                <td className="px-3 text-right">{!c.revoked_at && <Button size="sm" variant="ghost" onClick={() => confirm('Revoke this opt-in? The number will be added to your do-not-contact list.') && revoke.mutate(c.id)}>Revoke</Button>}</td>
+                <td className="px-3 text-right">{!c.revoked_at && <Button size="sm" variant="ghost" onClick={() => confirmAction('The number will be added to your do-not-contact list.', () => revoke.mutateAsync(c.id), { title: 'Revoke this opt-in?', confirmLabel: 'Revoke', success: 'Opt-in revoked' })}>Revoke</Button>}</td>
               </tr>
             ))}</tbody>
           </table>

@@ -1,18 +1,21 @@
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ListChecks, Download, Trash2, Pencil, Search, ArrowLeft, FileDown, Mail, BarChart3, Bell, Settings, Inbox } from 'lucide-react';
+import { ListChecks, Download, Trash2, Pencil, Search, ArrowLeft, FileDown, Mail, BarChart3, Bell, Settings, Inbox, Upload, Users, UserPlus, MessageCircle, PhoneCall } from 'lucide-react';
 import { api, type Meta } from '../lib/api';
+import { contactsApi, downloadCsv } from '../lib/contacts';
 import { Link, navigate } from '../lib/router';
 import { DetailBody } from '../components/DetailDrawer';
 import { AddToListDialog, ExportDialog, type Selection } from '../components/Dialogs';
-import { Badge, Button, Empty, Modal, Spinner } from '../components/ui';
+import { ImportContactsDialog } from '../components/ContactImport';
+import { Badge, Button, Empty, Modal, SearchInput, Spinner, cx } from '../components/ui';
+import { confirmAction } from '../components/feedback';
 
 function Page({ title, subtitle, actions, children }: { title: string; subtitle?: string; actions?: ReactNode; children: ReactNode }) {
   return (
     <div className="scroll-thin h-full overflow-y-auto">
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
         <div className="mb-6 flex flex-wrap items-end gap-3">
-          <div className="flex-1"><h1 className="text-xl font-semibold">{title}</h1>{subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}</div>
+          <div className="min-w-48 flex-1"><h1 className="text-xl font-semibold">{title}</h1>{subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}</div>
           {actions}
         </div>
         {children}
@@ -27,27 +30,31 @@ export function ListsPage() {
   const { data: lists, isLoading } = useQuery({ queryKey: ['lists'], queryFn: api.lists });
   const [edit, setEdit] = useState<{ id?: string; name: string } | null>(null);
   const [exportSel, setExportSel] = useState<Selection | null>(null);
+  const [importTo, setImportTo] = useState<{ id: string; name: string } | 'new' | null>(null);
   const save = useMutation({
     mutationFn: () => (edit?.id ? api.renameList(edit.id, edit.name) : api.createList(edit!.name)),
     onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['lists'] }); },
   });
   const del = useMutation({ mutationFn: api.deleteList, onSuccess: () => qc.invalidateQueries({ queryKey: ['lists'] }) });
   return (
-    <Page title="Lists" subtitle="Hand-picked groups of businesses: territories, prospects, call sheets." actions={<Button variant="primary" onClick={() => setEdit({ name: '' })}>New list</Button>}>
+    <Page title="Lists" subtitle="Hand-picked groups of businesses and your own contacts: territories, prospects, call sheets."
+      actions={<div className="flex gap-2"><Button onClick={() => setImportTo('new')}><Upload className="size-4" />Import from Excel</Button><Button variant="primary" onClick={() => setEdit({ name: '' })}>New list</Button></div>}>
       {isLoading && <Spinner />}
       {lists?.length === 0 && (
-        <div className={card}><Empty icon={<ListChecks className="size-10" />} title="No lists yet">Select businesses in Explore and choose “Add to list”, or create an empty list here.</Empty></div>
+        <div className={card}><Empty icon={<ListChecks className="size-10" />} title="No lists yet">Select businesses in Explore and choose “Add to list”, import your own contacts from an Excel or CSV file, or create an empty list here.</Empty></div>
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         {lists?.map((l) => (
           <div key={l.id} className={`${card} p-4`}>
             <div className="flex items-start gap-2">
-              <div className="flex-1"><div className="font-semibold">{l.name}</div><div className="text-sm text-slate-500">{l.n.toLocaleString()} businesses · created {l.created_at.slice(0, 10)}</div></div>
+              <div className="flex-1"><div className="font-semibold">{l.name}</div><div className="text-sm text-slate-500">{l.n.toLocaleString()} businesses · {l.contacts.toLocaleString()} contacts · created {l.created_at.slice(0, 10)}</div></div>
               <button className="rounded p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => setEdit({ id: l.id, name: l.name })} aria-label="Rename"><Pencil className="size-4" /></button>
-              <button className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10" onClick={() => confirm(`Delete “${l.name}”? The businesses stay in the database.`) && del.mutate(l.id)} aria-label="Delete"><Trash2 className="size-4" /></button>
+              <button className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10" onClick={() => confirmAction('The list and its own contacts are deleted. The businesses stay in the database.', () => del.mutateAsync(l.id), { title: `Delete “${l.name}”?`, confirmLabel: 'Delete', success: 'List deleted' })} aria-label="Delete"><Trash2 className="size-4" /></button>
             </div>
-            <div className="mt-4 flex gap-2">
-              <Button size="sm" onClick={() => navigate(`/?list=${l.id}`)}><Search className="size-3.5" /> Open in Explore</Button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button size="sm" disabled={!l.n} onClick={() => navigate(`/?list=${l.id}`)}><Search className="size-3.5" /> Open in Explore</Button>
+              <Button size="sm" onClick={() => navigate(`/lists/${l.id}`)}><Users className="size-3.5" /> Contacts</Button>
+              <Button size="sm" onClick={() => setImportTo({ id: l.id, name: l.name })}><UserPlus className="size-3.5" /> Add contacts</Button>
               <Button size="sm" disabled={!l.n} onClick={() => setExportSel({ query: `list=${l.id}&status=ready,lead,review`, count: l.n })}><Download className="size-3.5" /> Export</Button>
             </div>
           </div>
@@ -59,6 +66,65 @@ export function ListsPage() {
           className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900" placeholder="List name" />
       </Modal>
       <ExportDialog open={!!exportSel} onClose={() => setExportSel(null)} sel={exportSel} />
+      <ImportContactsDialog open={!!importTo} onClose={() => setImportTo(null)} list={importTo === 'new' ? undefined : importTo ?? undefined} />
+    </Page>
+  );
+}
+
+/** One list's own contacts (typed in or imported); its directory businesses are shown in Explore. */
+export function ListContactsPage({ id }: { id: string }) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
+  const list = useQuery({ queryKey: ['lists'], queryFn: api.lists, select: (ls) => ls.find((l) => l.id === id) });
+  const { data, isLoading, error } = useQuery({ queryKey: ['list-contacts', id, search], queryFn: () => contactsApi.list(id, search) });
+  const del = useMutation({ mutationFn: () => contactsApi.remove(id, [...sel]), onSuccess: () => { setSel(new Set()); qc.invalidateQueries({ queryKey: ['list-contacts', id] }); qc.invalidateQueries({ queryKey: ['lists'] }); } });
+  const rows = data?.rows ?? [];
+  const all = rows.length > 0 && rows.every((r) => sel.has(r.id));
+  const toggle = (k: string) => { const n = new Set(sel); if (n.has(k)) n.delete(k); else n.add(k); setSel(n); };
+  const name = list.data?.name ?? 'List';
+  return (
+    <Page title={name} subtitle={list.data ? `${list.data.contacts.toLocaleString()} own contacts · ${list.data.n.toLocaleString()} businesses from the directory` : undefined}
+      actions={<div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={() => navigate('/lists')}><ArrowLeft className="size-4" /> Lists</Button>
+        <Button size="sm" onClick={() => navigate(`/calls?new=1&list=${id}`)}><PhoneCall className="size-4" /> Call</Button>
+        <Button size="sm" onClick={() => navigate(`/campaigns/new?channel=voice&list=${id}`)}><PhoneCall className="size-4" /> Auto call</Button>
+        <Button size="sm" onClick={() => navigate(`/campaigns/new?channel=whatsapp&list=${id}`)}><MessageCircle className="size-4" /> WhatsApp</Button>
+        <Button size="sm" onClick={() => navigate(`/campaigns/new?channel=email&list=${id}`)}><Mail className="size-4" /> Email</Button>
+        <Button size="sm" variant="primary" onClick={() => setAdding(true)}><UserPlus className="size-4" /> Add contacts</Button></div>}>
+      {error && <p className="text-rose-600">{(error as Error).message}</p>}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <SearchInput value={search} onChange={setSearch} placeholder="Search name, phone, email…" className="min-w-48 flex-1" />
+        {sel.size > 0 && <Button size="sm" variant="danger" disabled={del.isPending} onClick={() => confirmAction('They are removed from this list only.', () => del.mutateAsync(), { title: `Remove ${sel.size} contact${sel.size === 1 ? '' : 's'}?`, confirmLabel: 'Remove', success: `${sel.size} contact${sel.size === 1 ? '' : 's'} removed` })}><Trash2 className="size-3.5" /> Remove {sel.size}</Button>}
+        <Button size="sm" disabled={!rows.length} onClick={() => downloadCsv(`${name.replace(/[^\w-]+/g, '_')}_contacts.csv`, ['Name', 'Company', 'Phone', 'Email', 'Area', 'District', 'Note'],
+          rows.map((r) => [r.name, r.company, r.phone, r.email, r.area, r.district, r.note].map((v) => v ?? '')))}><Download className="size-3.5" /> CSV</Button>
+      </div>
+      {isLoading && <Spinner />}
+      {data && !rows.length && (
+        <div className={card}><Empty icon={<Users className="size-10" />} title={search ? 'No matching contacts' : 'No own contacts yet'}>
+          {search ? 'Try another search.' : 'Add people by typing them in or importing an Excel/CSV file. Directory businesses in this list are shown in Explore.'}</Empty></div>
+      )}
+      {!!rows.length && (
+        <div className={cx(card, 'overflow-x-auto')}>
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs text-slate-500 dark:bg-slate-800/50"><tr>
+              <th className="w-10 px-4 py-2.5"><input type="checkbox" checked={all} onChange={() => setSel(all ? new Set() : new Set(rows.map((r) => r.id)))} className="size-4 accent-brand-600" aria-label="Select all" /></th>
+              <th className="font-medium">Name</th><th className="font-medium">Phone</th><th className="hidden font-medium sm:table-cell">Email</th><th className="hidden px-4 font-medium md:table-cell">Area</th></tr></thead>
+            <tbody>{rows.map((r) => (
+              <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
+                <td className="px-4 py-2.5"><input type="checkbox" checked={sel.has(r.id)} onChange={() => toggle(r.id)} className="size-4 accent-brand-600" aria-label="Select" /></td>
+                <td className="max-w-56"><div className="truncate font-medium">{r.name || r.company || '—'}</div>{r.name && r.company && <div className="truncate text-xs text-slate-400">{r.company}</div>}</td>
+                <td className="whitespace-nowrap tabular-nums">{r.phone ?? ''}</td>
+                <td className="hidden max-w-56 truncate sm:table-cell">{r.email ?? ''}</td>
+                <td className="hidden px-4 text-slate-500 md:table-cell">{[r.area, r.district].filter(Boolean).join(', ')}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+          {data!.total > rows.length && <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400 dark:border-slate-800">Showing {rows.length.toLocaleString()} of {data!.total.toLocaleString()}: search to narrow down.</p>}
+        </div>
+      )}
+      <ImportContactsDialog open={adding} onClose={() => setAdding(false)} list={{ id, name }} />
     </Page>
   );
 }

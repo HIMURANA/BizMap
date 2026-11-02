@@ -35,6 +35,8 @@
     "app:api": "tsx apps/api/server.ts",
     "app:web": "npm --prefix apps/web run dev",
     "app:build": "npm --prefix apps/web run build",
+    "app:tunnel": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/tunnel.ps1",
+    "app:check-calling": "node tools/check-calling.mjs",
     "pg:sync": "tsx apps/api/sync.ts",
     "pg:population": "node --max-old-space-size=4096 --import tsx apps/api/loadPopulationGrid.ts"
   },

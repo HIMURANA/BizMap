@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PhoneCall, Plus, Trash2, Phone, SkipForward, Clock, MapPin, MessageCircle, CheckCircle2 } from 'lucide-react';
+import { PhoneCall, Plus, Trash2, Phone, SkipForward, Clock, MapPin, MessageCircle, CheckCircle2, UserPlus, Mail } from 'lucide-react';
 import { api } from '../lib/api';
 import { out, OUTCOME_LABEL, type NextCall } from '../lib/outreach';
+import { reachable, type Contact } from '../lib/contacts';
 import { Link, navigate, useLocation } from '../lib/router';
+import { ContactImport } from '../components/ContactImport';
 import { Badge, Button, Empty, Modal, Spinner, cx } from '../components/ui';
 import { Page } from './CampaignPages';
+import { confirmAction } from '../components/feedback';
 
 const card = 'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
 const input = 'h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900';
@@ -22,26 +25,30 @@ export function CallsPage() {
   const [name, setName] = useState('');
   const [audience, setAudience] = useState(p.get('list') ? `list:${p.get('list')}` : p.get('query') !== null ? `query:${p.get('query')}` : '');
   const [script, setScript] = useState('Assalamu alaikum, this is ___ from ___. We help {{category}} businesses like yours with ___. Is the owner or manager available?');
+  const [byHand, setByHand] = useState(false);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const { data, isLoading } = useQuery({ queryKey: ['queues'], queryFn: out.queues });
   const lists = useQuery({ queryKey: ['lists'], queryFn: api.lists, enabled: open });
   const views = useQuery({ queryKey: ['views'], queryFn: api.views, enabled: open });
+  const typed = contacts.filter((c) => reachable(c, 'phone'));
   const create = useMutation({
-    mutationFn: () => out.createQueue({ name: name.trim(), script, list_id: audience.startsWith('list:') ? audience.slice(5) : undefined, query: audience.startsWith('query:') ? audience.slice(6) : undefined }),
+    mutationFn: () => out.createQueue({ name: name.trim(), script, list_id: audience.startsWith('list:') ? audience.slice(5) : undefined, query: audience.startsWith('query:') ? audience.slice(6) : undefined,
+      contacts: byHand ? typed : undefined }),
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['queues'] }); navigate(`/calls/${r.id}`); },
   });
   const del = useMutation({ mutationFn: out.deleteQueue, onSuccess: () => qc.invalidateQueries({ queryKey: ['queues'] }) });
   const queryOption = audience.startsWith('query:') && !views.data?.some((v) => `query:${v.query}` === audience);
   return (
-    <Page title="Call queues" subtitle="Work through businesses one call at a time. Outcomes improve the data for everyone."
+    <Page title="Call queues" subtitle="Work through businesses and your own contacts one call at a time. Outcomes improve the data for everyone."
       actions={<Button variant="primary" onClick={() => setOpen(true)}><Plus className="size-4" />New call queue</Button>}>
       {isLoading && <Spinner />}
-      {data?.length === 0 && <div className={card}><Empty icon={<PhoneCall className="size-10" />} title="No call queues yet">Create one from a list or a saved view. Only businesses with a phone number (and not on your do-not-contact list) are added.</Empty></div>}
+      {data?.length === 0 && <div className={card}><Empty icon={<PhoneCall className="size-10" />} title="No call queues yet">Create one from a list, a saved view, or numbers you type in or import from Excel. Only numbers not on your do-not-contact list are added.</Empty></div>}
       <div className="grid gap-3 sm:grid-cols-2">
         {data?.map((qu) => (
           <div key={qu.id} className={cx(card, 'p-4')}>
             <div className="flex items-start gap-2">
-              <Link to={`/calls/${qu.id}`} className="min-w-0 flex-1"><div className="truncate font-semibold hover:underline">{qu.name}</div><div className="text-sm text-slate-500">{qu.total.toLocaleString()} businesses · {new Date(qu.created_at).toLocaleDateString()}</div></Link>
-              <button className="rounded p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-600" onClick={() => confirm('Delete this call queue and its call log?') && del.mutate(qu.id)} aria-label="Delete queue"><Trash2 className="size-4" /></button>
+              <Link to={`/calls/${qu.id}`} className="min-w-0 flex-1"><div className="truncate font-semibold hover:underline">{qu.name}</div><div className="text-sm text-slate-500">{qu.total.toLocaleString()} numbers · {new Date(qu.created_at).toLocaleDateString()}</div></Link>
+              <button className="rounded p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-600" onClick={() => confirmAction('The queue and its call log are deleted.', () => del.mutateAsync(qu.id), { title: 'Delete this call queue?', confirmLabel: 'Delete', success: 'Call queue deleted' })} aria-label="Delete queue"><Trash2 className="size-4" /></button>
             </div>
             <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"><div className="bg-emerald-500" style={{ width: `${(qu.done / Math.max(1, qu.total)) * 100}%` }} /><div className="bg-brand-500" style={{ width: `${(qu.callbacks / Math.max(1, qu.total)) * 100}%` }} /></div>
             <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500"><span>{qu.pending} to call</span><span>{qu.callbacks} call-backs</span><span>{qu.done} done</span><span className="text-emerald-600">{qu.interested} interested</span></div>
@@ -50,19 +57,29 @@ export function CallsPage() {
         ))}
       </div>
       <Modal open={open} onClose={() => setOpen(false)} title="New call queue" wide
-        footer={<><Button onClick={() => setOpen(false)}>Cancel</Button><Button variant="primary" disabled={!name.trim() || !audience || create.isPending} onClick={() => create.mutate()}>Create queue</Button></>}>
+        footer={<><Button onClick={() => setOpen(false)}>Cancel</Button><Button variant="primary" disabled={!name.trim() || (!audience && !(byHand && typed.length)) || create.isPending} onClick={() => create.mutate()}>Create queue</Button></>}>
         <div className="space-y-4">
           <label className="block space-y-1.5"><span className="text-sm font-medium">Name</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Bogura pharmacies, week 45" className={input} /></label>
           <label className="block space-y-1.5"><span className="text-sm font-medium">Who to call</span>
             <select value={audience} onChange={(e) => setAudience(e.target.value)} className={input}>
-              <option value="">Choose a list or saved view…</option>
+              <option value="">{byHand ? 'No list: only the numbers added below' : 'Choose a list or saved view…'}</option>
               {queryOption && <option value={audience}>Current Explore filter</option>}
-              <optgroup label="Lists">{lists.data?.map((l) => <option key={l.id} value={`list:${l.id}`}>{l.name} ({l.n})</option>)}</optgroup>
+              <optgroup label="Lists">{lists.data?.map((l) => <option key={l.id} value={`list:${l.id}`}>{l.name} ({l.n} businesses{l.contacts ? `, ${l.contacts} contacts` : ''})</option>)}</optgroup>
               <optgroup label="Saved views">{views.data?.map((v) => <option key={v.id} value={`query:${v.query}`}>{v.name}</option>)}</optgroup>
-            </select></label>
+            </select>
+            <span className="block text-xs text-slate-500">A list's own contacts (typed in or imported) are included when they have a phone number.</span></label>
+          {byHand ? (
+            <div className="space-y-2 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+              <div className="flex items-center justify-between"><span className="text-sm font-medium">Numbers added by hand</span>
+                <button className="text-xs text-slate-500 hover:text-rose-600" onClick={() => { setByHand(false); setContacts([]); }}>Remove</button></div>
+              <ContactImport value={contacts} onChange={setContacts} channel="phone" />
+            </div>
+          ) : (
+            <Button size="sm" onClick={() => setByHand(true)}><UserPlus className="size-3.5" />Add numbers by hand or from Excel</Button>
+          )}
           <label className="block space-y-1.5"><span className="text-sm font-medium">Call script (shown to the caller)</span>
             <textarea value={script} onChange={(e) => setScript(e.target.value)} rows={5} className="w-full rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-900" /></label>
-          <p className="text-xs text-slate-500">Up to 5,000 businesses, ordered by district and area so calls follow a route. Each number appears once.</p>
+          <p className="text-xs text-slate-500">Up to 5,000 numbers, ordered by district and area so calls follow a route. Each number appears once.</p>
           {create.error && <p className="text-sm text-rose-600">{(create.error as Error).message}</p>}
         </div>
       </Modal>
@@ -105,8 +122,9 @@ export function CallWork({ id }: { id: string }) {
             <div className="space-y-4">
               <div className="flex flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <Link to={`/business/${encodeURIComponent(b.id)}`} className="text-lg font-semibold hover:underline">{b.name}</Link>
-                  <div className="text-sm text-slate-500">{b.cat_label}</div>
+                  {b.own ? <div className="text-lg font-semibold">{b.name}</div> : <Link to={`/business/${encodeURIComponent(b.id)}`} className="text-lg font-semibold hover:underline">{b.name}</Link>}
+                  <div className="flex items-center gap-1.5 text-sm text-slate-500">{b.cat_label}{b.own && <Badge tone="violet">own contact</Badge>}</div>
+                  {b.own && b.email && <div className="mt-1 flex items-center gap-1 text-sm text-slate-500"><Mail className="size-3.5" />{b.email}</div>}
                   <div className="mt-1 flex items-center gap-1 text-sm text-slate-500"><MapPin className="size-3.5" />{[b.area, b.upazila, b.district?.replace(/ District$/, '')].filter(Boolean).join(', ') || '—'}</div>
                 </div>
                 {current.item.status === 'callback' && <Badge tone="blue">call-back</Badge>}
@@ -114,16 +132,17 @@ export function CallWork({ id }: { id: string }) {
               </div>
               <a href={`tel:${current.item.phone}`} className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-lg font-semibold text-white hover:bg-emerald-700">
                 <Phone className="size-5" />{current.item.phone}</a>
-              <p className="text-center text-xs text-slate-500">Tap to call from your phone. Number status: {b.phone_status ?? 'unverified'}.</p>
-              {current.script && <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800/60"><div className="mb-1 text-xs font-medium uppercase text-slate-400">Script</div><p className="whitespace-pre-wrap">{current.script.replace(/\{\{\s*category\s*\}\}/g, b.cat_label.toLowerCase()).replace(/\{\{\s*name\s*\}\}/g, b.name)}</p></div>}
+              <p className="text-center text-xs text-slate-500">Tap to call from your phone.{b.own ? ' Number from your own contacts.' : ` Number status: ${b.phone_status ?? 'unverified'}.`}</p>
+              {b.own && b.note && <div className="text-xs text-slate-500">Contact note: {b.note}</div>}
+              {current.script && <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800/60"><div className="mb-1 text-xs font-medium uppercase text-slate-400">Script</div><p className="whitespace-pre-wrap">{current.script.replace(/\{\{\s*category\s*\}\}\s?/g, b.own ? '' : `${b.cat_label.toLowerCase()} `).replace(/\{\{\s*name\s*\}\}/g, b.name)}</p></div>}
               {!!current.history?.length && <div className="text-xs text-slate-500">Earlier calls: {current.history.map((h) => `${OUTCOME_LABEL[h.outcome] ?? h.outcome} (${new Date(h.called_at).toLocaleDateString()})`).join(' · ')}</div>}
               {current.item.notes && <div className="text-xs text-slate-500">Notes: {current.item.notes}</div>}
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Notes (who you spoke to, what they need…)" className="w-full rounded-lg border border-slate-200 bg-white p-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={waOptIn} onChange={(e) => setWaOptIn(e.target.checked)} className="size-4 accent-emerald-600" />
                 <MessageCircle className="size-4 text-emerald-600" />They agreed to receive WhatsApp messages (recorded as opt-in with your name and time)</label>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {OUTCOME_BUTTONS.map(([k, cls]) => (
-                  <button key={k} disabled={log.isPending || (k === 'callback' && !callbackAt)} onClick={() => (k !== 'do_not_call' || confirm('Add this number to your do-not-contact list?')) && log.mutate(k)}
+                {OUTCOME_BUTTONS.filter(([k]) => !b.own || k !== 'not_a_business').map(([k, cls]) => (
+                  <button key={k} disabled={log.isPending || (k === 'callback' && !callbackAt)} onClick={() => (k === 'do_not_call' ? confirmAction('It will not be called, messaged or emailed again from this workspace.', () => log.mutateAsync(k), { title: 'Add to do-not-contact list?', confirmLabel: 'Do not call', success: 'Added to do-not-contact list' }) : log.mutate(k))}
                     className={cx('rounded-lg border border-slate-200 px-2 py-2 text-sm font-medium disabled:opacity-40 dark:border-slate-700', cls || 'hover:bg-slate-50 dark:hover:bg-slate-800', cls.includes('text-white') && 'border-transparent')}>
                     {OUTCOME_LABEL[k]}</button>
                 ))}

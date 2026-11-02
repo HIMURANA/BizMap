@@ -5,7 +5,7 @@ import { ApiError, api, type Me } from './lib/api';
 import { Link, navigate, useLocation } from './lib/router';
 import { useI18n, type Key } from './lib/i18n';
 import { Explore } from './pages/Explore';
-import { BusinessPage, ExportsPage, ListsPage, PlannedPage } from './pages/Pages';
+import { BusinessPage, ExportsPage, ListContactsPage, ListsPage, PlannedPage } from './pages/Pages';
 import { AcceptInvitePage, LoginPage, SignupPage } from './pages/AuthPages';
 import { SettingsPage } from './pages/SettingsPages';
 import { ReportView, ReportsPage } from './pages/ReportsPages';
@@ -114,6 +114,7 @@ function Shell({ me }: { me: Me }) {
   else if (!meta) page = <div className="flex h-full items-center justify-center"><Spinner className="size-6" /></div>;
   else if (path.startsWith('/business/')) page = <BusinessPage id={decodeURIComponent(path.slice('/business/'.length))} meta={meta} />;
   else if (path === '/lists') page = <ListsPage />;
+  else if (path.startsWith('/lists/')) page = <ListContactsPage id={path.slice('/lists/'.length)} />;
   else if (path === '/exports') page = <ExportsPage />;
   else if (path === '/reports') page = <ReportsPage meta={meta} />;
   else if (path.startsWith('/reports/')) page = <ReportView id={path.slice('/reports/'.length)} meta={meta} />;

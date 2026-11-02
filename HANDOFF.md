@@ -127,6 +127,52 @@ never claim the directory is complete, keep OpenStreetMap + Overture attribution
 - **To go live:** set SMTP_URL + MAIL_FROM (+ verify the sending domain with the provider), connect WhatsApp per workspace (needs a public
   APP_URL for the webhook), get a lawyer's view on Bangladesh rules for unsolicited B2B email/calls before selling outreach.
 
+## 3h. Own contacts: Excel/CSV import + manual entry (3 Nov 2026)
+- **Lists** can now hold the workspace's own contacts next to directory businesses: table `list_contacts` (name, company, phone, email,
+  area, district, note; deduped per list on phone+email). API in `apps/api/contacts.ts`: `GET/POST/DELETE /api/lists/:id/contacts`.
+  Web: Lists → "Import from Excel" (new list) or "Add contacts" (existing list); `/lists/:id` shows, searches, removes and downloads them as CSV.
+- **Import** is parsed in the browser (`apps/web/src/lib/contacts.ts`, `read-excel-file` pinned 9.3.12, lazy-loaded): .xlsx (first sheet) and .csv;
+  header row + columns auto-detected (English/Bangla), mapping editable; also "type or paste" (one per line) and a one-at-a-time form.
+  Phones become 8801XXXXXXXXX; a 10-digit 17… number (Excel dropped the 0) is accepted too (`normalizeWaPhone`). Old .xls is refused with a hint.
+- **Campaigns**: `campaigns.audience_contacts` (jsonb, max 10k) = recipients typed/imported straight into a campaign; usable with a list/view or on
+  their own (no list + no filter now means "only these", never "every business"). List contacts are included when a list is the audience.
+  Recipient `biz_id` is `contact:<id>` (list) or `manual`. Email footer for own contacts says "your address is in <sender>'s contact list".
+- **WhatsApp opt-in no longer required (user decision, 3 Nov 2026):** WhatsApp campaigns go to every BD mobile in the audience
+  (directory, list contacts, typed/Excel numbers). Opt-in fields were removed from the import dialogs and `/api/consents/bulk` was removed;
+  STOP replies and the do-not-contact list still exclude numbers (checked at launch and before each send). Risk: Meta's WhatsApp
+  Business policy expects opt-in; messaging people who did not ask can lower the number's quality rating or get it restricted.
+- **Tested:** API e2e 26/26 (import, dedupe, rejects, normalisation, search, consent validation before save, campaign previews, launch, workspace
+  isolation) + browser (xlsx import with auto-mapping, contacts page, WhatsApp typed numbers + opt-in, preview). Test accounts deleted.
+  **Careful:** `.env` has real SMTP settings, so a launched test campaign really tries to send (it failed with "Unauthorized IP address").
+- **Call queues** (`calls.ts`) also take own contacts: a list's contacts with a phone, plus numbers typed/imported in the "New call queue" dialog
+  (any phone, landlines too). Item `biz_id` = `contact:<id>` or `manual:<phone>`; `isBizId()` in `contacts.ts` tells them apart.
+  The call screen shows them as "own contact" (no directory link, no "Not a business" button); wrong number/closed on them create NO data
+  reports; a verbal WhatsApp opt-in is stored without a biz_id. No list + no filter = only the typed numbers. Lists' contacts page has a "Call" button.
+  Tested: calls API e2e 19/19 + browser (typed queue, call card). Test accounts deleted.
+
+## 3i. Auto-call (voice broadcast) campaigns in Bangla (3 Nov 2026)
+- New campaign channel `voice` (`apps/api/voice.ts`, wired into `campaigns.ts`): same audience as other campaigns (list incl. own contacts,
+  saved view, typed/Excel numbers). Any BD number, mobile or landline, stored as E.164 digits (`normalizeBdPhone`).
+- Call flow: worker dials via **Twilio** (inside calling hours, max `VOICE_MAX_CONCURRENT` at once) → on answer Twilio fetches
+  `/api/voice/twiml/:rid` → message plays twice inside a 1-key `<Gather>` → press 1 = `replied` ("interested"), press 9 = suppression +
+  `unsubscribed`; status webhook sets answered / no answer / busy. Every call starts with "এটি <sender name> থেকে একটি স্বয়ংক্রিয় কল"
+  and ends with the 1/9 instructions (sender name required to launch). Webhooks check `X-Twilio-Signature`.
+- Speech: **Azure** neural `bn-BD-NabanitaNeural` / `bn-BD-PradeepNeural`, cached MP3s in `data/voice_audio/` (served at
+  `/api/voice/audio/<hash>`); without `AZURE_SPEECH_KEY` Twilio `<Say language="bn-IN">` (Indian Bengali accent) is used.
+- Credits: `VOICE_CREDITS_PER_CALL` (default 3) per recipient at launch, refunded per undialled call on cancel. "Call me" test call (free).
+- **Test mode** (no `TWILIO_*` in .env): nothing is dialled; recipients become "not dialled". **To go live:** Twilio account + number that may
+  call Bangladesh, `TWILIO_ACCOUNT_SID/AUTH_TOKEN/FROM`, a public https `APP_URL` (tunnel in dev), optionally `AZURE_SPEECH_KEY/REGION`.
+  Check BTRC rules for automated marketing calls before calling at scale; a local BD voice-broadcast aggregator (local caller ID, better
+  answer rates) would be a second provider adapter in `voice.ts`, but none was integrated or verified.
+- **Custom voice (own recording):** editor switch "Computer voice / My own voice". Record in the browser (MediaRecorder) or upload any
+  audio file; the browser converts it to 8 kHz mono 16-bit WAV (`apps/web/src/lib/voice.ts`, max 75 s to fit the 2 MB request limit) and
+  uploads it to `POST /api/voice/clips` (table `voice_clips`, per workspace; file `data/voice_audio/<hash>.wav`). Campaign `voice_clip`
+  replaces the TTS message; intro + 1/9 instructions are still spoken around it. Calls are stored as segment lists in
+  `campaign_recipients.media` (`[{say}|{audio}]`). Tested: custom-voice e2e 11/11 + browser upload/convert/select; mic recording itself
+  not tested (no microphone in the test browser).
+- **Tested:** voice e2e 28 checks incl. signed webhooks on a second instance with a fake token (nothing dialled) + browser (editor, listen).
+  NOT tested: a real Twilio call, real Azure audio. Test accounts deleted.
+
 ## 3f. Gridded population (1 Nov 2026), fixes the city population gap above
 - Source: **WorldPop R2025A, 2025, 100 m constrained** `bgd_pop_2025_CN_100m_R2025A_v1.tif` (55 MB, CC BY 4.0) from data.worldpop.org,
   stored in `data/population_grid/` (git-ignored). Loaded by `npm run pg:population` (`apps/api/loadPopulationGrid.ts`, needs devDependency `geotiff`)

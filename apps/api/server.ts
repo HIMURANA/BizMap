@@ -21,6 +21,7 @@ import './campaigns.js';
 import './calls.js';
 import './whatsapp.js';
 import './alerts.js';
+import './contacts.js';
 import { startWorkers } from './workers.js';
 
 const EXPORT_DIR = resolve(ROOT, 'data/app_exports');
@@ -366,12 +367,16 @@ on('POST', '/api/business/:id/report', async ({ req, m, ctx }) => {
 });
 
 // --- lists & views
-on('GET', '/api/lists', async ({ ctx }) => { need(ctx); return q(`SELECT l.id, l.name, l.created_at, COUNT(i.biz_id)::int n FROM lists l LEFT JOIN list_items i ON i.list_id = l.id WHERE l.workspace_id = $1 GROUP BY l.id ORDER BY l.created_at DESC`, [ctx.workspaceId]); });
+on('GET', '/api/lists', async ({ ctx }) => {
+  need(ctx);
+  return q(`SELECT l.id, l.name, l.created_at, (SELECT COUNT(*)::int FROM list_items i WHERE i.list_id = l.id) n, (SELECT COUNT(*)::int FROM list_contacts c WHERE c.list_id = l.id) contacts
+    FROM lists l WHERE l.workspace_id = $1 ORDER BY l.created_at DESC`, [ctx.workspaceId]);
+});
 on('POST', '/api/lists', async ({ req, ctx }) => {
   need(ctx);
   const name = str((await body(req)).name, 80);
   if (!name) throw new HttpError(400, 'Enter a list name.');
-  return one(`INSERT INTO lists (workspace_id, name, created_by) VALUES ($1, $2, $3) RETURNING id, name, 0 AS n`, [ctx.workspaceId, name, ctx.userId]);
+  return one(`INSERT INTO lists (workspace_id, name, created_by) VALUES ($1, $2, $3) RETURNING id, name, 0 AS n, 0 AS contacts`, [ctx.workspaceId, name, ctx.userId]);
 });
 on('PATCH', '/api/lists/:id', async ({ req, m, ctx }) => {
   need(ctx);

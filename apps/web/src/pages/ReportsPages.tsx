@@ -5,6 +5,7 @@ import { api, type Meta, type SiteReportResult } from '../lib/api';
 import { Link, navigate } from '../lib/router';
 import { MapView } from '../components/MapView';
 import { Badge, Button, Empty, Spinner, catColor, cx } from '../components/ui';
+import { confirmAction } from '../components/feedback';
 
 const card = 'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
 const fmtDist = (m: number) => (m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`);
@@ -63,7 +64,7 @@ export function ReportsPage({ meta }: { meta: Meta }) {
                 <div className="truncate font-medium hover:underline">{r.title}</div>
                 <div className="mt-0.5 text-sm text-slate-500">{r.radius_km} km{r.focus_cat ? ` · ${meta.categories.find((c) => c.id === r.focus_cat)?.label ?? r.focus_cat}` : ''} · {new Date(r.created_at).toLocaleDateString()}{r.by ? ` · ${r.by}` : ''}</div>
               </Link>
-              <button className="rounded p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10" onClick={() => confirm('Delete this report?') && del.mutate(r.id)} aria-label="Delete report"><Trash2 className="size-4" /></button>
+              <button className="rounded p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10" onClick={() => confirmAction('The saved report is deleted.', () => del.mutateAsync(r.id), { title: 'Delete this report?', confirmLabel: 'Delete', success: 'Report deleted' })} aria-label="Delete report"><Trash2 className="size-4" /></button>
             </div>
           ))}
         </div>

@@ -32,7 +32,7 @@ export interface BusinessDetail extends BusinessRow {
   reports: { kind: string; note: string; status: string; created_at: string }[];
   attribution: string;
 }
-export interface UserList { id: string; name: string; created_at: string; n: number }
+export interface UserList { id: string; name: string; created_at: string; n: number; contacts: number }
 export interface SavedView { id: string; name: string; query: string; created_at: string }
 export interface ExportPreset { id: string; label: string; cols: string[]; paid: boolean }
 export interface ExportRecord { id: string; name: string; format: string; preset: string; query: string; rows: number; credits: number; created_at: string }

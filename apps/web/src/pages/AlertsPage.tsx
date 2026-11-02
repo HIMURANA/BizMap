@@ -6,6 +6,7 @@ import { out, type Alert } from '../lib/outreach';
 import { Link, useLocation } from '../lib/router';
 import { Badge, Button, Empty, Modal, Spinner, cx } from '../components/ui';
 import { Page } from './CampaignPages';
+import { confirmAction } from '../components/feedback';
 
 const card = 'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
 const input = 'h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900';
@@ -66,7 +67,7 @@ function AlertCard({ a, onChange }: { a: Alert; onChange: () => void }) {
         </div>
         <Button size="sm" onClick={() => run.mutate()} disabled={run.isPending}>{run.isPending ? <Spinner className="size-3" /> : <Play className="size-3.5" />}Check now</Button>
         <Button size="sm" variant="ghost" onClick={() => toggle.mutate()} title={a.active ? 'Pause' : 'Resume'}>{a.active ? <BellOff className="size-4" /> : <Bell className="size-4" />}</Button>
-        <Button size="sm" variant="ghost" onClick={() => confirm('Delete this alert?') && del.mutate()} title="Delete"><Trash2 className="size-4" /></Button>
+        <Button size="sm" variant="ghost" onClick={() => confirmAction('You will stop getting new-business updates for this filter.', () => del.mutateAsync(), { title: 'Delete this alert?', confirmLabel: 'Delete', success: 'Alert deleted' })} title="Delete"><Trash2 className="size-4" /></Button>
       </div>
       {run.data && <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{run.data.new_count === 0 ? 'Nothing new since the last check.' : `${run.data.new_count} new business${run.data.new_count === 1 ? '' : 'es'} found.`}</p>}
       {expanded && (

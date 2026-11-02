@@ -5,6 +5,7 @@ import { SendingTab } from './SendingSettings';
 import { api, type Me, type Role } from '../lib/api';
 import { Link, useLocation } from '../lib/router';
 import { Badge, Button, Spinner, cx } from '../components/ui';
+import { confirmAction } from '../components/feedback';
 
 const card = 'rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900';
 const input = 'h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900';
@@ -90,7 +91,8 @@ function TeamTab() {
               ) : <Badge tone={m.role === 'owner' ? 'violet' : m.role === 'admin' ? 'blue' : 'slate'}>{m.role}</Badge>}
               {(admin || m.id === data.me) && (
                 <button className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10" title={m.id === data.me ? 'Leave workspace' : 'Remove from workspace'}
-                  onClick={() => confirm(m.id === data.me ? 'Leave this workspace?' : `Remove ${m.name} from this workspace?`) && remove.mutate(m.id)}><Trash2 className="size-4" /></button>
+                  onClick={() => confirmAction(m.id === data.me ? 'You lose access until someone invites you again.' : 'They lose access to this workspace.', () => remove.mutateAsync(m.id),
+                    { title: m.id === data.me ? 'Leave this workspace?' : `Remove ${m.name}?`, confirmLabel: m.id === data.me ? 'Leave' : 'Remove', success: m.id === data.me ? 'You left the workspace' : `${m.name} removed` })}><Trash2 className="size-4" /></button>
               )}
             </li>
           ))}

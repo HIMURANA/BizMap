@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, Check, Trash2 } from 'lucide-react';
-import { out, type SendingSettings } from '../lib/outreach';
+import { Copy, Check, Trash2, AlertTriangle } from 'lucide-react';
+import { FREE_MAIL_WARNING, isFreeMailbox, out, type SendingSettings } from '../lib/outreach';
 import { Badge, Button, Spinner, cx } from '../components/ui';
+import { confirmAction } from '../components/feedback';
 
 const card = 'rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900';
 const input = 'h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900';
@@ -38,7 +39,8 @@ function EmailSection({ s, disabled }: { s: SendingSettings; disabled: boolean }
       desc="Shown in every campaign email. The postal address is required: recipients must be able to see who is writing to them.">
       <fieldset disabled={disabled} className="grid gap-4 sm:grid-cols-2">
         <Field label="Sender name"><input value={f.sender_name} onChange={(e) => setF({ ...f, sender_name: e.target.value })} placeholder="Acme Distribution" className={input} /></Field>
-        <Field label="Sender email" hint="Must be on a domain your email provider has verified (SPF / DKIM)."><input type="email" value={f.sender_email} onChange={(e) => setF({ ...f, sender_email: e.target.value })} placeholder="sales@acme.com.bd" className={input} /></Field>
+        <Field label="Sender email" hint="Must be on a domain your email provider has verified (SPF / DKIM)."><input type="email" value={f.sender_email} onChange={(e) => setF({ ...f, sender_email: e.target.value })} placeholder="sales@acme.com.bd" className={input} />
+          {isFreeMailbox(f.sender_email) && <span className="mt-1.5 flex gap-1.5 rounded-lg bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{FREE_MAIL_WARNING}</span>}</Field>
         <Field label="Reply-to (optional)"><input type="email" value={f.reply_to} onChange={(e) => setF({ ...f, reply_to: e.target.value })} className={input} /></Field>
         <Field label="Daily email limit" hint="Start low (100–200) and raise it slowly: new senders who send too much land in spam."><input type="number" min={10} max={5000} value={f.daily_email_cap} onChange={(e) => setF({ ...f, daily_email_cap: Number(e.target.value) })} className={input} /></Field>
         <div className="sm:col-span-2"><Field label="Business postal address"><input value={f.postal_address} onChange={(e) => setF({ ...f, postal_address: e.target.value })} placeholder="House 12, Road 5, Dhanmondi, Dhaka 1205" className={input} /></Field></div>
@@ -80,7 +82,7 @@ function WhatsAppSection({ s, disabled }: { s: SendingSettings; disabled: boolea
       {!disabled && (
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending && <Spinner className="size-3.5 border-white/40 border-t-white" />}Save &amp; check with Meta</Button>
-          {wa.mode === 'live' && <Button variant="ghost" onClick={() => confirm('Disconnect WhatsApp? Campaigns and replies stop until you reconnect.') && disconnect.mutate()}>Disconnect</Button>}
+          {wa.mode === 'live' && <Button variant="ghost" onClick={() => confirmAction('Campaigns and replies stop until you reconnect.', () => disconnect.mutateAsync(), { title: 'Disconnect WhatsApp?', confirmLabel: 'Disconnect', success: 'WhatsApp disconnected' })}>Disconnect</Button>}
           {save.isSuccess && <span className="text-sm text-emerald-600">Saved.</span>}
           {save.error && <span className="text-sm text-rose-600">{(save.error as Error).message}</span>}
         </div>
@@ -111,7 +113,7 @@ function SuppressionSection({ isAdmin }: { isAdmin: boolean }) {
           <li key={s.value} className="flex items-center gap-3 py-2">
             <span className="min-w-0 flex-1 truncate">{s.value}</span><Badge>{s.channel}</Badge>
             <span className="hidden text-xs text-slate-400 sm:inline">{s.reason} · {new Date(s.created_at).toLocaleDateString()}</span>
-            {isAdmin && <button className="text-slate-300 hover:text-rose-600" title="Remove (they could be contacted again)" onClick={() => confirm(`Remove ${s.value}? They could be contacted again.`) && remove.mutate(s.value)}><Trash2 className="size-4" /></button>}
+            {isAdmin && <button className="text-slate-300 hover:text-rose-600" title="Remove (they could be contacted again)" onClick={() => confirmAction('They could be contacted again.', () => remove.mutateAsync(s.value), { title: `Remove ${s.value}?`, confirmLabel: 'Remove', success: 'Removed from do-not-contact list' })}><Trash2 className="size-4" /></button>}
           </li>
         ))}
       </ul>

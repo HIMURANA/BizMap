@@ -1,17 +1,26 @@
 /** API client for Phase 3–5: campaigns, sending settings, suppressions, call queues, WhatsApp inbox and opt-ins, alerts. */
 import { req, send } from './api';
+import type { Contact } from './contacts';
 
+export type CampaignChannel = 'email' | 'whatsapp' | 'voice';
+/** Free mailboxes publish strict anti-spoofing rules (DMARC): mail "from" them sent through Brevo/SES/etc. is rejected or lands in spam. */
+const FREE_MAIL = /@(gmail|googlemail|yahoo|ymail|outlook|hotmail|live|msn|icloud|me|aol|proton|protonmail|gmx|yandex|zoho|mail)\.[a-z.]+$/i;
+export const isFreeMailbox = (email: string | null | undefined) => !!email && FREE_MAIL.test(email.trim());
+export const FREE_MAIL_WARNING = 'Emails "from" a free mailbox (Gmail, Yahoo, Outlook…) sent through an email service are usually blocked or put in spam, even when the app shows them as sent. Use an address on your own domain (e.g. sales@yourcompany.com) and verify that domain in your email provider (e.g. Brevo → Senders, Domains → add domain → SPF/DKIM).';
+export interface VoiceMeta { mode: 'live' | 'test'; tts: 'azure' | 'twilio_say'; voices: { id: string; label: string }[]; credits_per_call: number; intro: string; outro: string }
+export interface VoiceClip { id: string; name: string; seconds: number; created_at: string; created_by?: string | null }
 export type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'paused' | 'sent' | 'cancelled';
 export interface Campaign {
-  id: string; channel: 'email' | 'whatsapp'; name: string; status: CampaignStatus;
+  id: string; channel: CampaignChannel; name: string; status: CampaignStatus; voice_name?: string | null; voice_clip?: string | null; voice_clip_name?: string | null;
   audience_list: string | null; audience_query: string | null; list_name: string | null;
+  contacts_n?: number; audience_contacts?: { [K in keyof Contact]: string | null }[];
   subject: string | null; body: string | null; wa_template: string | null; wa_language: string | null; wa_params: string[] | null;
   send_at: string | null; created_at: string; launched_at: string | null; finished_at: string | null;
   recipients: number; credits: number; created_by_name: string | null; sent?: number;
   stats?: Record<string, number>; recipients_sample?: { biz_id: string; address: string; name: string; status: string; reason: string | null; sent_at: string | null }[];
 }
 export interface Preview {
-  eligible: number; excluded: { no_address: number; suppressed: number; no_consent: number; duplicate: number };
+  eligible: number; excluded: { no_address: number; suppressed: number; duplicate: number };
   credits: number; balance: number; sample: { subject?: string; text: string } | null;
 }
 export interface WaTemplate { name: string; language: string; category: string; body: string; params: number }
@@ -33,7 +42,8 @@ export interface CallQueueDetail {
 export interface NextCall {
   item: null | { id: number; biz_id: string; phone: string; name: string; status: string; attempts: number; notes: string | null; callback_at: string | null };
   outside_hours?: boolean; done?: boolean; hours?: { start: number; end: number; now: number };
-  biz?: { id: string; name: string; cat_label: string; area: string | null; upazila: string | null; district: string | null; phone: string; phone_status: string | null; email: string | null; website: string | null; facebook: string | null; lat: number | null; lon: number | null };
+  biz?: { id: string; name: string; cat_label: string; area: string | null; upazila: string | null; district: string | null; phone: string; phone_status: string | null; email: string | null; website: string | null; facebook: string | null; lat: number | null; lon: number | null;
+    own?: boolean; note?: string | null }; // own = the workspace's own contact, not a directory business
   history?: { outcome: string; notes: string | null; called_at: string; queue: string }[];
   script?: string | null;
 }
@@ -70,9 +80,14 @@ export const out = {
 
   campaigns: () => req<Campaign[]>('/campaigns'),
   campaign: (id: string) => req<Campaign>(`/campaigns/${id}`),
-  campaignMeta: () => req<{ merge_fields: string[]; mail_mode: string; wa_mode: string; can_launch: boolean }>('/campaigns/meta/fields'),
-  createCampaign: (b: Partial<Campaign>) => send<{ id: string }>('/campaigns', 'POST', b),
-  updateCampaign: (id: string, b: Partial<Campaign>) => send(`/campaigns/${id}`, 'PATCH', b),
+  campaignMeta: () => req<{ merge_fields: string[]; mail_mode: string; wa_mode: string; can_launch: boolean; voice: VoiceMeta }>('/campaigns/meta/fields'),
+  voicePreview: (text: string, voice: string) => send<{ audio: string | null; tts: string }>('/voice/preview', 'POST', { text, voice }),
+  voiceClips: () => req<VoiceClip[]>('/voice/clips'),
+  uploadClip: (name: string, wav: string) => send<VoiceClip & { audio: string }>('/voice/clips', 'POST', { name, wav }),
+  deleteClip: (id: string) => send(`/voice/clips/${id}`, 'DELETE', {}),
+  testCall: (id: string, phone: string) => send<{ to: string }>(`/campaigns/${id}/test`, 'POST', { phone }),
+  createCampaign: (b: Partial<Omit<Campaign, 'audience_contacts'>> & { audience_contacts?: Contact[] }) => send<{ id: string }>('/campaigns', 'POST', b),
+  updateCampaign: (id: string, b: Partial<Omit<Campaign, 'audience_contacts'>> & { audience_contacts?: Contact[] }) => send(`/campaigns/${id}`, 'PATCH', b),
   deleteCampaign: (id: string) => send(`/campaigns/${id}`, 'DELETE', {}),
   preview: (id: string) => send<Preview>(`/campaigns/${id}/preview`, 'POST', {}),
   testSend: (id: string) => send<{ to: string; mode: string }>(`/campaigns/${id}/test`, 'POST', {}),
@@ -82,7 +97,7 @@ export const out = {
 
   queues: () => req<CallQueue[]>('/calls/queues'),
   queue: (id: string) => req<CallQueueDetail>(`/calls/queues/${id}`),
-  createQueue: (b: { name: string; list_id?: string; query?: string; script?: string }) => send<{ id: string; items: number; skipped: number }>('/calls/queues', 'POST', b),
+  createQueue: (b: { name: string; list_id?: string; query?: string; script?: string; contacts?: Contact[] }) => send<{ id: string; items: number; skipped: number }>('/calls/queues', 'POST', b),
   deleteQueue: (id: string) => send(`/calls/queues/${id}`, 'DELETE', {}),
   nextCall: (id: string) => send<NextCall>(`/calls/queues/${id}/next`, 'POST', {}),
   outcome: (itemId: number, b: { outcome: string; notes?: string; callback_at?: string; whatsapp_opt_in?: boolean }) => send<{ status: string }>(`/calls/items/${itemId}/outcome`, 'POST', b),
