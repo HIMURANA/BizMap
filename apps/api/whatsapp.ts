@@ -48,9 +48,15 @@ export async function waConfig(ws: string) {
 
 async function graph(token: string, path: string, init?: RequestInit) {
   const res = await fetch(`${GRAPH}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(init?.headers ?? {}) } });
-  const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: { message?: string } };
-  if (!res.ok) throw new Error(`WhatsApp API: ${data.error?.message ?? res.status}`);
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: { message?: string; code?: number } };
+  if (!res.ok) throw Object.assign(new Error(`WhatsApp API: ${data.error?.message ?? res.status}`), { waCode: data.error?.code });
   return data;
+}
+
+/** Meta says the number has no WhatsApp account (131026 = message undeliverable). Remember it so campaigns skip it next time. */
+const WA_NOT_ON_WHATSAPP = 131026;
+async function markNotOnWhatsApp(ws: string, address: string) {
+  await q(`INSERT INTO suppressions (workspace_id, value, channel, reason) VALUES ($1, $2, 'whatsapp', 'not on WhatsApp') ON CONFLICT (workspace_id, value) DO NOTHING`, [ws, address]);
 }
 
 async function conversation(ws: string, address: string, extra: { bizId?: string | null; name?: string | null } = {}) {
@@ -78,10 +84,16 @@ export async function sendWaTemplate(ws: string, to: string, template: string, l
     await addMessage(convId, { direction: 'out', body: preview, template, status: 'sent (test)', userId: ctx.userId, campaignId: ctx.campaignId });
     return null;
   }
-  const data = await graph((await cfg.token())!, `${cfg.phoneNumberId}/messages`, { method: 'POST', body: JSON.stringify({
-    messaging_product: 'whatsapp', to, type: 'template',
-    template: { name: template, language: { code: language }, components: params.length ? [{ type: 'body', parameters: params.map((text) => ({ type: 'text', text })) }] : [] },
-  }) });
+  let data: Record<string, unknown>;
+  try {
+    data = await graph((await cfg.token())!, `${cfg.phoneNumberId}/messages`, { method: 'POST', body: JSON.stringify({
+      messaging_product: 'whatsapp', to, type: 'template',
+      template: { name: template, language: { code: language }, components: params.length ? [{ type: 'body', parameters: params.map((text) => ({ type: 'text', text })) }] : [] },
+    }) });
+  } catch (e) {
+    if ((e as { waCode?: number }).waCode === WA_NOT_ON_WHATSAPP) { await markNotOnWhatsApp(ws, to); throw new Error('Number is not on WhatsApp'); }
+    throw e;
+  }
   const id = ((data.messages as { id: string }[] | undefined)?.[0]?.id) ?? null;
   await addMessage(convId, { direction: 'out', body: preview, template, status: 'sent', providerId: id, userId: ctx.userId, campaignId: ctx.campaignId });
   return id;
@@ -227,8 +239,6 @@ on('POST', '/api/inbox/:id/template', async ({ req, m, ctx }) => {
   need(ctx);
   const c = await getConv(m[1]!, ctx.workspaceId);
   const b = await body(req);
-  if (!(await one(`SELECT 1 FROM consents WHERE workspace_id = $1 AND channel = 'whatsapp' AND address = $2 AND revoked_at IS NULL`, [ctx.workspaceId, c.address])))
-    throw new HttpError(409, 'No recorded opt-in for this number. Record one first (Contacts & opt-ins) or wait for them to message you.');
   if (await one(`SELECT 1 FROM suppressions WHERE workspace_id = $1 AND value = $2`, [ctx.workspaceId, c.address])) throw new HttpError(409, 'This number is on your do-not-contact list.');
   try {
     await sendWaTemplate(ctx.workspaceId, c.address, str(b.template, 120), str(b.language, 20) || 'en', Array.isArray(b.params) ? b.params.map((x) => str(x, 500)) : [], { userId: ctx.userId });
@@ -293,8 +303,9 @@ on('POST', '/api/whatsapp/webhook', async ({ req, res }) => {
       if (await one(`SELECT 1 FROM messages WHERE provider_id = $1`, [msg.id])) continue; // Meta retries deliveries
       await receive(ws, msg.from, text, names.get(msg.from) ?? null, msg.id);
     }
-    for (const st of (v.statuses as { id: string; status: string; errors?: { title?: string }[] }[]) ?? []) {
+    for (const st of (v.statuses as { id: string; status: string; recipient_id?: string; errors?: { title?: string; code?: number }[] }[]) ?? []) {
       const err = st.errors?.[0]?.title ?? null;
+      if (st.status === 'failed' && st.errors?.[0]?.code === WA_NOT_ON_WHATSAPP && st.recipient_id) await markNotOnWhatsApp(ws, st.recipient_id);
       await q(`UPDATE messages SET status = $2, error = COALESCE($3, error) WHERE provider_id = $1`, [st.id, st.status, err]);
       const mapped = ({ sent: 'sent', delivered: 'delivered', read: 'read', failed: 'failed' } as Record<string, string>)[st.status];
       if (mapped) await q(`UPDATE campaign_recipients SET status = $2, reason = COALESCE($3, reason), updated_at = now() WHERE provider_id = $1 AND status <> 'replied'`, [st.id, mapped, err]);
