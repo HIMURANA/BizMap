@@ -29,7 +29,7 @@ export interface WaTemplate { name: string; language: string; category: string; 
 export interface SendingSettings {
   sender_name: string | null; sender_email: string | null; reply_to: string | null; postal_address: string | null;
   daily_email_cap: number; call_hours_start: number; call_hours_end: number; mail_mode: 'smtp' | 'test' | 'disabled';
-  whatsapp: { mode: 'live' | 'test' | 'disabled'; phone_number_id: string | null; waba_id: string | null; verify_token: string | null; webhook_url: string; has_token: boolean };
+  whatsapp: { mode: 'live' | 'test' | 'disabled'; phone_number_id: string | null; waba_id: string | null; verify_token: string | null; webhook_url: string; has_token: boolean; has_app_secret: boolean };
 }
 export interface Suppression { value: string; channel: string; reason: string | null; created_at: string }
 export interface OutboxMail { id: number; kind: string; to_addr: string; subject: string; body_text: string; mode: string; status: string; error: string | null; created_at: string }

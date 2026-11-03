@@ -163,7 +163,7 @@ on('GET', '/api/settings/sending', async ({ ctx }) => {
   need(ctx);
   const wa = await waConfig(ctx.workspaceId);
   return { ...(await settings(ctx.workspaceId)), mail_mode: MAIL_MODE, whatsapp: { mode: wa.mode, phone_number_id: wa.phoneNumberId, waba_id: wa.wabaId, verify_token: wa.verifyToken,
-    webhook_url: `${PUBLIC_URL()}/api/whatsapp/webhook`, has_token: wa.hasToken } };
+    webhook_url: `${PUBLIC_URL()}/api/whatsapp/webhook`, has_token: wa.hasToken, has_app_secret: wa.hasAppSecret } };
 });
 on('PUT', '/api/settings/sending', async ({ req, ctx }) => {
   need(ctx, 'admin');

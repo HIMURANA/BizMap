@@ -459,6 +459,8 @@ function AddRecipientsDialog({ open, onClose, channel, onAdd }: { open: boolean;
 const VOICE_STATUS: Record<string, string> = {
   queued: 'waiting', sent: 'ringing', delivered: 'answered', replied: 'pressed 1 (interested)', unsubscribed: 'pressed 9 / do not call', failed: 'not reached', skipped: 'not dialled',
 };
+/** A WhatsApp message still "sent" this long after sending has had no delivery report from Meta. */
+const NO_REPORT_MS = 10 * 60 * 1000;
 function CampaignView({ c }: { c: Campaign }) {
   const qc = useQueryClient();
   const act = useMutation({ mutationFn: (a: 'pause' | 'resume' | 'cancel') => out.campaignAction(c.id, a), onSuccess: () => { qc.invalidateQueries({ queryKey: ['campaign', c.id] }); qc.invalidateQueries({ queryKey: ['meta'] }); } });
@@ -495,7 +497,7 @@ function CampaignView({ c }: { c: Campaign }) {
             <tr key={r.address} className="border-t border-slate-100 dark:border-slate-800">
               <td className="px-5 py-2">{r.biz_id === 'manual' || r.biz_id.startsWith('contact:') ? r.name : <Link to={`/business/${encodeURIComponent(r.biz_id)}`} className="hover:underline">{r.name}</Link>}</td>
               <td className="text-slate-500">{r.address}</td>
-              <td><Badge tone={STATUS_TONE[r.status] ?? 'slate'}>{label(r.status)}</Badge></td>
+              <td><Badge tone={STATUS_TONE[r.status] ?? 'slate'}>{label(r.status)}</Badge>{c.channel === 'whatsapp' && r.status === 'sent' && r.sent_at && Date.now() - new Date(r.sent_at).getTime() > NO_REPORT_MS && <Badge tone="amber" className="ml-1" title="Meta accepted this message but has sent no delivery report. Check the webhook in Settings → Sending, or Meta may have dropped it.">no delivery report</Badge>}</td>
               <td className="hidden max-w-56 truncate px-5 text-xs text-slate-400 md:table-cell">{r.reason ?? (r.sent_at ? fmt(r.sent_at) : '')}</td>
             </tr>
           ))}</tbody>

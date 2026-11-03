@@ -41,7 +41,7 @@ export async function waConfig(ws: string) {
   const live = !!(s?.wa_phone_number_id && s.wa_token_enc);
   return {
     mode: (live ? 'live' : process.env.NODE_ENV === 'production' ? 'disabled' : 'test') as 'live' | 'test' | 'disabled',
-    phoneNumberId: s?.wa_phone_number_id ?? null, wabaId: s?.wa_waba_id ?? null, verifyToken: s?.wa_verify_token ?? null, hasToken: !!s?.wa_token_enc,
+    phoneNumberId: s?.wa_phone_number_id ?? null, wabaId: s?.wa_waba_id ?? null, verifyToken: s?.wa_verify_token ?? null, hasToken: !!s?.wa_token_enc, hasAppSecret: !!s?.wa_app_secret_enc,
     token: async () => decrypt(s?.wa_token_enc), appSecret: async () => decrypt(s?.wa_app_secret_enc),
   };
 }
@@ -332,10 +332,11 @@ on('POST', '/api/whatsapp/webhook', async ({ req, res }) => {
     const phoneId = (v.metadata as { phone_number_id?: string } | undefined)?.phone_number_id;
     if (!phoneId) continue;
     const ws = (await one<{ workspace_id: string }>(`SELECT workspace_id FROM workspace_settings WHERE wa_phone_number_id = $1`, [phoneId]))?.workspace_id;
-    if (!ws) continue;
+    if (!ws) { console.warn(`[whatsapp webhook] ignored: no workspace uses phone number id ${phoneId}`); continue; }
     const secret = await (await waConfig(ws)).appSecret();
     const expected = secret ? `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}` : '';
-    if (!secret || sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) { res.writeHead(401).end(); return; }
+    if (!secret) { console.warn(`[whatsapp webhook] rejected: workspace ${ws} has no app secret saved (Settings → Sending)`); res.writeHead(401).end(); return; }
+    if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) { console.warn(`[whatsapp webhook] rejected: bad signature for workspace ${ws} (wrong app secret?)`); res.writeHead(401).end(); return; }
     const names = new Map(((v.contacts as { wa_id: string; profile?: { name?: string } }[]) ?? []).map((c) => [c.wa_id, c.profile?.name ?? null]));
     for (const msg of (v.messages as { from: string; id: string; type: string; text?: { body?: string }; button?: { text?: string } }[]) ?? []) {
       const text = msg.text?.body ?? msg.button?.text ?? `[${msg.type} message]`;

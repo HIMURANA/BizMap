@@ -67,7 +67,7 @@ function WhatsAppSection({ s, disabled }: { s: SendingSettings; disabled: boolea
         <Field label="Phone number ID"><input value={f.phone_number_id} onChange={(e) => setF({ ...f, phone_number_id: e.target.value })} className={input} /></Field>
         <Field label="WhatsApp Business Account ID"><input value={f.waba_id} onChange={(e) => setF({ ...f, waba_id: e.target.value })} className={input} /></Field>
         <Field label="Permanent access token" hint={wa.has_token ? 'A token is saved. Leave empty to keep it.' : 'From a System User in Meta Business Settings.'}><input type="password" value={f.access_token} onChange={(e) => setF({ ...f, access_token: e.target.value })} autoComplete="off" className={input} /></Field>
-        <Field label="App secret" hint="Used to check that webhook calls really come from Meta."><input type="password" value={f.app_secret} onChange={(e) => setF({ ...f, app_secret: e.target.value })} autoComplete="off" className={input} /></Field>
+        <Field label="App secret" hint={wa.has_app_secret ? 'A secret is saved. Leave empty to keep it.' : 'Not saved: delivery and read reports from Meta are rejected, so messages stay "sent". Add it from Meta App → Settings → Basic.'}><input type="password" value={f.app_secret} onChange={(e) => setF({ ...f, app_secret: e.target.value })} autoComplete="off" className={input} /></Field>
       </fieldset>
       {wa.verify_token && (
         <div className="mt-4 space-y-2 rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800/60">
