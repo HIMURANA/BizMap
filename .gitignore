@@ -34,3 +34,6 @@ data/fcommerce/*.csv
 # SaaS app exports (customer files)
 data/app_exports/
 data/population_grid/
+
+# web build output
+apps/web/dist/
