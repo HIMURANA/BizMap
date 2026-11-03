@@ -20,7 +20,7 @@ export interface Campaign {
   stats?: Record<string, number>; recipients_sample?: { biz_id: string; address: string; name: string; status: string; reason: string | null; sent_at: string | null }[];
 }
 export interface Preview {
-  eligible: number; excluded: { no_address: number; suppressed: number; duplicate: number };
+  eligible: number; excluded: { no_address: number; suppressed: number; no_consent: number; duplicate: number };
   credits: number; balance: number; sample: { subject?: string; text: string } | null;
 }
 export interface WaTemplate { name: string; language: string; category: string; body: string; params: number }
