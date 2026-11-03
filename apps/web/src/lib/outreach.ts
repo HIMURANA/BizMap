@@ -14,7 +14,7 @@ export interface Campaign {
   id: string; channel: CampaignChannel; name: string; status: CampaignStatus; voice_name?: string | null; voice_clip?: string | null; voice_clip_name?: string | null;
   audience_list: string | null; audience_query: string | null; list_name: string | null;
   contacts_n?: number; audience_contacts?: { [K in keyof Contact]: string | null }[];
-  subject: string | null; body: string | null; wa_template: string | null; wa_language: string | null; wa_params: string[] | null;
+  subject: string | null; body: string | null; wa_template: string | null; wa_language: string | null; wa_params: string[] | null; wa_header?: WaHeader | null;
   send_at: string | null; created_at: string; launched_at: string | null; finished_at: string | null;
   recipients: number; credits: number; created_by_name: string | null; sent?: number;
   stats?: Record<string, number>; recipients_sample?: { biz_id: string; address: string; name: string; status: string; reason: string | null; sent_at: string | null }[];
@@ -23,7 +23,9 @@ export interface Preview {
   eligible: number; excluded: { no_address: number; suppressed: number; no_consent: number; duplicate: number };
   credits: number; balance: number; sample: { subject?: string; text: string } | null;
 }
-export interface WaTemplate { name: string; language: string; category: string; body: string; params: number }
+export type WaMediaFormat = 'IMAGE' | 'VIDEO' | 'DOCUMENT';
+export interface WaHeader { format: WaMediaFormat; url: string }
+export interface WaTemplate { name: string; language: string; category: string; body: string; params: number; header_format: WaMediaFormat | null; unsupported: string | null }
 export interface SendingSettings {
   sender_name: string | null; sender_email: string | null; reply_to: string | null; postal_address: string | null;
   daily_email_cap: number; call_hours_start: number; call_hours_end: number; mail_mode: 'smtp' | 'test' | 'disabled';

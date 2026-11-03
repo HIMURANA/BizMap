@@ -117,10 +117,10 @@ const audienceLabel = (c: Campaign) => {
 };
 
 // ------------------------------------------------------------------ editor (new + draft)
-type Draft = { channel: CampaignChannel; voice_name: string; voice_clip: string; name: string; audience: string; subject: string; body: string; wa_template: string; wa_language: string; wa_params: string[]; contacts: Contact[] };
+type Draft = { channel: CampaignChannel; voice_name: string; voice_clip: string; name: string; audience: string; subject: string; body: string; wa_template: string; wa_language: string; wa_params: string[]; wa_header_url: string; contacts: Contact[] };
 const fromCampaign = (c: Campaign): Draft => ({
   channel: c.channel, voice_name: c.voice_name ?? '', voice_clip: c.voice_clip ?? '', name: c.name, audience: c.audience_list ? `list:${c.audience_list}` : c.audience_query !== null ? `query:${c.audience_query}` : '',
-  subject: c.subject ?? '', body: c.body ?? '', wa_template: c.wa_template ?? '', wa_language: c.wa_language ?? 'en', wa_params: c.wa_params ?? [],
+  subject: c.subject ?? '', body: c.body ?? '', wa_template: c.wa_template ?? '', wa_language: c.wa_language ?? 'en', wa_params: c.wa_params ?? [], wa_header_url: c.wa_header?.url ?? '',
   contacts: (c.audience_contacts ?? []).map((x) => ({ ...empty(), ...Object.fromEntries(Object.entries(x).map(([k, v]) => [k, v ?? ''])) })),
 });
 
@@ -129,7 +129,7 @@ export function CampaignNew() {
   const p = new URLSearchParams(search);
   const channel: CampaignChannel = p.get('channel') === 'whatsapp' ? 'whatsapp' : p.get('channel') === 'voice' ? 'voice' : 'email';
   const initial: Draft = { channel, voice_name: '', voice_clip: '', name: '', audience: p.get('list') ? `list:${p.get('list')}` : p.get('query') !== null ? `query:${p.get('query')}` : '',
-    subject: '', body: channel === 'email' ? 'Dear {{name}},\n\n\n\nBest regards,' : channel === 'voice' ? VOICE_SAMPLE : '', wa_template: '', wa_language: 'en', wa_params: [], contacts: [] };
+    subject: '', body: channel === 'email' ? 'Dear {{name}},\n\n\n\nBest regards,' : channel === 'voice' ? VOICE_SAMPLE : '', wa_template: '', wa_language: 'en', wa_params: [], wa_header_url: '', contacts: [] };
   return <Page title={`New ${channel === 'whatsapp' ? 'WhatsApp' : channel === 'voice' ? 'auto-call' : 'email'} campaign`} back="/campaigns"><Editor initial={initial} /></Page>;
 }
 
@@ -159,7 +159,7 @@ function Editor({ initial, id }: { initial: Draft; id?: string }) {
 
   const payload = () => ({
     channel: d.channel, name: d.name.trim(), audience_list: d.audience.startsWith('list:') ? d.audience.slice(5) : null, audience_query: d.audience.startsWith('query:') ? d.audience.slice(6) : null,
-    subject: d.subject, body: d.body, wa_template: d.wa_template || null, wa_language: d.wa_language, wa_params: d.wa_params, audience_contacts: d.contacts,
+    subject: d.subject, body: d.body, wa_template: d.wa_template || null, wa_language: d.wa_language, wa_params: d.wa_params, wa_header: tpl?.header_format && d.wa_header_url.trim() ? { format: tpl.header_format, url: d.wa_header_url.trim() } : null, audience_contacts: d.contacts,
     voice_name: d.voice_name || null, voice_clip: d.voice_clip || null,
   });
   const hasAudience = !!d.audience || d.contacts.length > 0;
@@ -242,6 +242,13 @@ function Editor({ initial, id }: { initial: Draft; id?: string }) {
             </label>
             {tpl && (
               <>
+                {tpl.unsupported && <WarnBanner>This template cannot be sent from here: {tpl.unsupported}.</WarnBanner>}
+                {tpl.header_format && (
+                  <label className="block space-y-1"><span className="text-sm font-medium">{tpl.header_format === 'IMAGE' ? 'Header image' : tpl.header_format === 'VIDEO' ? 'Header video' : 'Header document'} link</span>
+                    <input value={d.wa_header_url} onChange={(e) => set({ wa_header_url: e.target.value })} placeholder="https://…" inputMode="url" className={input} />
+                    <span className="block text-xs text-slate-500">This template has a {tpl.header_format.toLowerCase()} header, so WhatsApp needs a public https link to the file ({tpl.header_format === 'IMAGE' ? 'JPG or PNG, up to 5 MB' : tpl.header_format === 'VIDEO' ? 'MP4, up to 16 MB' : 'PDF, up to 100 MB'}).</span></label>
+                )}
+                {tpl.header_format === 'IMAGE' && /^https:\/\//i.test(d.wa_header_url.trim()) && <img src={d.wa_header_url.trim()} alt="Header preview" className="max-h-40 rounded-lg border border-slate-200 dark:border-slate-700" />}
                 <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-950 dark:bg-emerald-500/10 dark:text-emerald-100">{tpl.body}</div>
                 {d.wa_params.map((v, i) => (
                   <label key={i} className="block space-y-1"><span className="text-xs text-slate-500">{`{{${i + 1}}}`}: text or a field like {'{{name}}'}</span>

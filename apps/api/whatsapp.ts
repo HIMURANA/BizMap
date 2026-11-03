@@ -71,9 +71,56 @@ async function addMessage(convId: string, m: { direction: 'in' | 'out'; body: st
   await q(`UPDATE conversations SET last_message_at = now()${m.direction === 'in' ? ', last_inbound_at = now(), unread = unread + 1, status = \'open\'' : ''} WHERE id = $1`, [convId]);
 }
 
+export type WaMediaFormat = 'IMAGE' | 'VIDEO' | 'DOCUMENT';
+export interface WaHeader { format: WaMediaFormat; url: string }
+const MEDIA_FORMATS: readonly string[] = ['IMAGE', 'VIDEO', 'DOCUMENT'];
+
+/** Validates a header from user input: a media format and a public https link. Returns null when empty; throws when malformed. */
+export function readWaHeader(v: unknown): WaHeader | null {
+  if (!v || typeof v !== 'object') return null;
+  const { format, url } = v as { format?: unknown; url?: unknown };
+  const link = typeof url === 'string' ? url.trim() : '';
+  if (!link) return null;
+  if (typeof format !== 'string' || !MEDIA_FORMATS.includes(format)) throw new HttpError(400, 'Header media must be an image, video or document.');
+  if (link.length > 2000 || !/^https:\/\/[^\s]+$/i.test(link)) throw new HttpError(400, 'The header media link must be a public https:// URL.');
+  return { format: format as WaMediaFormat, url: link };
+}
+
+/** Components for a template send, in the order Meta expects: header media, body variables. */
+export function waComponents(params: string[], header?: WaHeader | null) {
+  const components: Record<string, unknown>[] = [];
+  if (header) components.push({ type: 'header', parameters: [{ type: header.format.toLowerCase(), [header.format.toLowerCase()]: { link: header.url } }] });
+  if (params.length) components.push({ type: 'body', parameters: params.map((text) => ({ type: 'text', text })) });
+  return components;
+}
+
+export interface WaTemplateInfo { name: string; language: string; category: string; body: string; params: number; header_format: WaMediaFormat | null; unsupported: string | null }
+type MetaComponent = { type: string; text?: string; format?: string; buttons?: { type: string; url?: string }[] };
+/** What a template needs from the sender, read from Meta's component list. */
+export function describeTemplate(t: { name: string; language: string; category: string; components?: MetaComponent[] }): WaTemplateInfo {
+  const comps = t.components ?? [];
+  const text = comps.find((c) => c.type === 'BODY')?.text ?? '';
+  const header = comps.find((c) => c.type === 'HEADER');
+  const headerFormat = header?.format && MEDIA_FORMATS.includes(header.format) ? (header.format as WaMediaFormat) : null;
+  let unsupported: string | null = null;
+  if (header?.format === 'TEXT' && /\{\{/.test(header.text ?? '')) unsupported = 'its header has a variable';
+  else if (header && !headerFormat && header.format !== 'TEXT') unsupported = `its ${header.format?.toLowerCase() ?? 'header'} header type is not supported`;
+  else if (comps.some((c) => c.type === 'BUTTONS' && c.buttons?.some((b) => b.type === 'URL' && /\{\{/.test(b.url ?? '')))) unsupported = 'a button link has a variable';
+  return { name: t.name, language: t.language, category: t.category, body: text, params: (text.match(/\{\{\d+\}\}/g) ?? []).length, header_format: headerFormat, unsupported };
+}
+
+/** Approved templates of the workspace's WhatsApp account (the built-in test templates in test mode). */
+export async function listWaTemplates(ws: string): Promise<{ mode: 'live' | 'test' | 'disabled'; templates: WaTemplateInfo[] }> {
+  const cfg = await waConfig(ws);
+  if (cfg.mode === 'test') return { mode: 'test', templates: WA_TEST_TEMPLATES.map((t) => ({ ...t, header_format: null, unsupported: null })) };
+  if (cfg.mode === 'disabled' || !cfg.wabaId) return { mode: cfg.mode, templates: [] };
+  const data = await graph((await cfg.token())!, `${cfg.wabaId}/message_templates?status=APPROVED&limit=200&fields=name,language,category,components`);
+  return { mode: 'live', templates: ((data.data as { name: string; language: string; category: string; components?: MetaComponent[] }[]) ?? []).map(describeTemplate) };
+}
+
 /** Sends one approved template message. Returns the provider message id (null in test mode). */
 export async function sendWaTemplate(ws: string, to: string, template: string, language: string, params: string[],
-  ctx: { campaignId?: string | null; bizId?: string | null; name?: string | null; userId?: string | null } = {}): Promise<string | null> {
+  ctx: { campaignId?: string | null; bizId?: string | null; name?: string | null; userId?: string | null; header?: WaHeader | null } = {}): Promise<string | null> {
   const cfg = await waConfig(ws);
   if (cfg.mode === 'disabled') throw new Error('WhatsApp is not connected for this workspace.');
   const convId = await conversation(ws, to, { bizId: ctx.bizId, name: ctx.name });
@@ -88,7 +135,7 @@ export async function sendWaTemplate(ws: string, to: string, template: string, l
   try {
     data = await graph((await cfg.token())!, `${cfg.phoneNumberId}/messages`, { method: 'POST', body: JSON.stringify({
       messaging_product: 'whatsapp', to, type: 'template',
-      template: { name: template, language: { code: language }, components: params.length ? [{ type: 'body', parameters: params.map((text) => ({ type: 'text', text })) }] : [] },
+      template: { name: template, language: { code: language }, components: waComponents(params, ctx.header) },
     }) });
   } catch (e) {
     if ((e as { waCode?: number }).waCode === WA_NOT_ON_WHATSAPP) { await markNotOnWhatsApp(ws, to); throw new Error('Number is not on WhatsApp'); }
@@ -152,15 +199,7 @@ on('DELETE', '/api/settings/whatsapp', async ({ ctx }) => {
 });
 on('GET', '/api/whatsapp/templates', async ({ ctx }) => {
   need(ctx);
-  const cfg = await waConfig(ctx.workspaceId);
-  if (cfg.mode === 'test') return { mode: 'test', templates: WA_TEST_TEMPLATES };
-  if (cfg.mode === 'disabled' || !cfg.wabaId) return { mode: cfg.mode, templates: [] };
-  const data = await graph((await cfg.token())!, `${cfg.wabaId}/message_templates?status=APPROVED&limit=200&fields=name,language,category,components`);
-  const templates = ((data.data as { name: string; language: string; category: string; components: { type: string; text?: string }[] }[]) ?? []).map((t) => {
-    const text = t.components.find((c) => c.type === 'BODY')?.text ?? '';
-    return { name: t.name, language: t.language, category: t.category, body: text, params: (text.match(/\{\{\d+\}\}/g) ?? []).length };
-  });
-  return { mode: 'live', templates };
+  return listWaTemplates(ctx.workspaceId);
 });
 
 // ------------------------------------------------------------------ routes: consents
@@ -241,7 +280,7 @@ on('POST', '/api/inbox/:id/template', async ({ req, m, ctx }) => {
   const b = await body(req);
   if (await one(`SELECT 1 FROM suppressions WHERE workspace_id = $1 AND value = $2`, [ctx.workspaceId, c.address])) throw new HttpError(409, 'This number is on your do-not-contact list.');
   try {
-    await sendWaTemplate(ctx.workspaceId, c.address, str(b.template, 120), str(b.language, 20) || 'en', Array.isArray(b.params) ? b.params.map((x) => str(x, 500)) : [], { userId: ctx.userId });
+    await sendWaTemplate(ctx.workspaceId, c.address, str(b.template, 120), str(b.language, 20) || 'en', Array.isArray(b.params) ? b.params.map((x) => str(x, 500)) : [], { userId: ctx.userId, header: readWaHeader(b.header) });
   } catch (e) { throw new HttpError(502, (e as Error).message); }
   return { ok: true };
 });

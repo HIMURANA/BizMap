@@ -17,7 +17,7 @@ import { atLeast } from './auth.js';
 import { HttpError, body, html, need, on, rawBody, str, esc, balance } from './http.js';
 import { sendMail, MAIL_MODE } from './mailer.js';
 import { sign, verify } from './secrets.js';
-import { WA_TEST_TEMPLATES, normalizeWaPhone, sendWaTemplate, waConfig } from './whatsapp.js';
+import { WA_TEST_TEMPLATES, listWaTemplates, normalizeWaPhone, readWaHeader, sendWaTemplate, waConfig, type WaHeader } from './whatsapp.js';
 import { cleanContacts, isBizId, type Contact } from './contacts.js';
 import { INTRO, OUTRO, VOICES, VOICE_CREDITS_PER_CALL, clipName, describe, normalizeBdPhone, phoneForms, processVoice, testCall, ttsMode, voiceMode, type Part } from './voice.js';
 
@@ -111,8 +111,8 @@ function senderProblem(s: Settings): string | null {
 // ------------------------------------------------------------------ worker step (called by workers.ts)
 export async function processCampaigns(): Promise<void> {
   await q(`UPDATE campaigns SET status = 'sending' WHERE status = 'scheduled' AND send_at <= now()`);
-  const active = await q<{ id: string; workspace_id: string; channel: Channel; subject: string; body: string; wa_template: string; wa_language: string; wa_params: string[] | null; voice_name: string | null; voice_clip: string | null }>(
-    `SELECT id, workspace_id, channel, subject, body, wa_template, wa_language, wa_params, voice_name, voice_clip FROM campaigns WHERE status = 'sending' ORDER BY launched_at`);
+  const active = await q<{ id: string; workspace_id: string; channel: Channel; subject: string; body: string; wa_template: string; wa_language: string; wa_params: string[] | null; wa_header: WaHeader | null; voice_name: string | null; voice_clip: string | null }>(
+    `SELECT id, workspace_id, channel, subject, body, wa_template, wa_language, wa_params, wa_header, voice_name, voice_clip FROM campaigns WHERE status = 'sending' ORDER BY launched_at`);
   for (const c of active) {
     const s = await settings(c.workspace_id);
     if (c.channel === 'voice') {
@@ -148,7 +148,7 @@ export async function processCampaigns(): Promise<void> {
             AND NOT EXISTS (SELECT 1 FROM consents n WHERE n.workspace_id = k.workspace_id AND n.channel = 'whatsapp' AND n.address = k.address AND n.revoked_at IS NULL)`, [c.workspace_id, r.address]);
           if (optedOut) { await q(`UPDATE campaign_recipients SET status = 'skipped', reason = 'opted out', updated_at = now() WHERE id = $1`, [r.id]); continue; }
           const params = (c.wa_params ?? []).map((p) => render(p, r.merge));
-          providerId = await sendWaTemplate(c.workspace_id, r.address, c.wa_template, c.wa_language, params, { campaignId: c.id, bizId: isBizId(r.biz_id) ? r.biz_id : null, name: r.merge.name || null });
+          providerId = await sendWaTemplate(c.workspace_id, r.address, c.wa_template, c.wa_language, params, { campaignId: c.id, bizId: isBizId(r.biz_id) ? r.biz_id : null, name: r.merge.name || null, header: c.wa_header });
         }
         await q(`UPDATE campaign_recipients SET status = 'sent', provider_id = $2, sent_at = now(), updated_at = now() WHERE id = $1`, [r.id, providerId]);
       } catch (e) {
@@ -204,7 +204,7 @@ on('GET', '/api/outbox', async ({ ctx }) => {
 });
 
 // ------------------------------------------------------------------ routes: campaigns
-const CAMPAIGN_COLS = `c.id, c.channel, c.name, c.status, c.audience_list, c.audience_query, jsonb_array_length(c.audience_contacts)::int AS contacts_n, c.subject, c.body, c.wa_template, c.wa_language, c.wa_params, c.voice_name, c.voice_clip,
+const CAMPAIGN_COLS = `c.id, c.channel, c.name, c.status, c.audience_list, c.audience_query, jsonb_array_length(c.audience_contacts)::int AS contacts_n, c.subject, c.body, c.wa_template, c.wa_language, c.wa_params, c.wa_header, c.voice_name, c.voice_clip,
   (SELECT vc.name FROM voice_clips vc WHERE vc.workspace_id = c.workspace_id AND vc.id = c.voice_clip) AS voice_clip_name,
   c.send_at, c.created_at, c.launched_at, c.finished_at, c.recipients, c.credits, l.name AS list_name, u.name AS created_by_name`;
 async function getCampaign(id: string, ws: string) {
@@ -224,6 +224,7 @@ function readDraft(b: Record<string, unknown>) {
     subject: str(b.subject, 200), body: typeof b.body === 'string' ? b.body.slice(0, 20000) : '',
     wa_template: str(b.wa_template, 120) || null, wa_language: str(b.wa_language, 20) || 'en',
     wa_params: Array.isArray(b.wa_params) ? b.wa_params.slice(0, 10).map((x) => str(x, 500)) : [],
+    wa_header: readWaHeader(b.wa_header),
     audience_contacts: cleanContacts(b.audience_contacts, MAX_CAMPAIGN_CONTACTS).contacts,
     voice_name: VOICES.some((v) => v.id === b.voice_name) ? String(b.voice_name) : VOICES[0]!.id,
     voice_clip: typeof b.voice_clip === 'string' && /^[0-9a-f]{32}$/.test(b.voice_clip) ? b.voice_clip : null,
@@ -239,10 +240,10 @@ on('POST', '/api/campaigns', async ({ req, ctx }) => {
   need(ctx);
   const d = readDraft(await body(req));
   if (!d.name) throw new HttpError(400, 'Give the campaign a name.');
-  return one(`INSERT INTO campaigns (workspace_id, channel, name, audience_list, audience_query, subject, body, wa_template, wa_language, wa_params, created_by, audience_contacts, voice_name, voice_clip)
+  return one(`INSERT INTO campaigns (workspace_id, channel, name, audience_list, audience_query, subject, body, wa_template, wa_language, wa_params, created_by, audience_contacts, voice_name, voice_clip, wa_header)
     VALUES ($1, $2, $3, (SELECT id FROM lists WHERE id::text = $4 AND workspace_id = $1), $5, $6, $7, $8, $9, $10, $11, $12, $13,
-      (SELECT id FROM voice_clips WHERE workspace_id = $1 AND id = $14)) RETURNING id`,
-    [ctx.workspaceId, d.channel, d.name, d.audience_list ?? '', d.audience_query, d.subject, d.body, d.wa_template, d.wa_language, JSON.stringify(d.wa_params), ctx.userId, JSON.stringify(d.audience_contacts), d.voice_name, d.voice_clip]);
+      (SELECT id FROM voice_clips WHERE workspace_id = $1 AND id = $14), $15) RETURNING id`,
+    [ctx.workspaceId, d.channel, d.name, d.audience_list ?? '', d.audience_query, d.subject, d.body, d.wa_template, d.wa_language, JSON.stringify(d.wa_params), ctx.userId, JSON.stringify(d.audience_contacts), d.voice_name, d.voice_clip, d.wa_header ? JSON.stringify(d.wa_header) : null]);
 });
 on('GET', '/api/campaigns/:id', async ({ m, ctx }) => {
   need(ctx);
@@ -256,7 +257,7 @@ on('PATCH', '/api/campaigns/:id', async ({ req, m, ctx }) => {
   if (c.status !== 'draft') throw new HttpError(409, 'Only drafts can be edited.');
   const d = readDraft({ ...c, ...(await body(req)), channel: c.channel });
   await q(`UPDATE campaigns SET name = $3, audience_list = (SELECT id FROM lists WHERE id::text = $4 AND workspace_id = $2), audience_query = $5, subject = $6, body = $7, wa_template = $8, wa_language = $9, wa_params = $10, audience_contacts = $11, voice_name = $12,
-    voice_clip = (SELECT id FROM voice_clips WHERE workspace_id = $2 AND id = $13) WHERE id = $1 AND workspace_id = $2`, [c.id, ctx.workspaceId, d.name || String(c.name), d.audience_list ?? '', d.audience_list ? null : d.audience_query, d.subject, d.body, d.wa_template, d.wa_language, JSON.stringify(d.wa_params), JSON.stringify(d.audience_contacts), d.voice_name, d.voice_clip]);
+    voice_clip = (SELECT id FROM voice_clips WHERE workspace_id = $2 AND id = $13), wa_header = $14 WHERE id = $1 AND workspace_id = $2`, [c.id, ctx.workspaceId, d.name || String(c.name), d.audience_list ?? '', d.audience_list ? null : d.audience_query, d.subject, d.body, d.wa_template, d.wa_language, JSON.stringify(d.wa_params), JSON.stringify(d.audience_contacts), d.voice_name, d.voice_clip, d.wa_header ? JSON.stringify(d.wa_header) : null]);
   return { ok: true };
 });
 on('DELETE', '/api/campaigns/:id', async ({ m, ctx }) => {
@@ -272,7 +273,7 @@ async function preview(c: Awaited<ReturnType<typeof getCampaign>>, ws: string) {
   const sample = a.eligible[0];
   let rendered: { subject?: string; text: string } | null = null;
   if (sample && c.channel === 'email') { const e = await composeEmail(ws, { id: String(c.id), subject: c.subject, body: c.body }, sample.address, sample.merge); rendered = { subject: e.subject, text: e.text }; }
-  if (sample && c.channel === 'whatsapp') rendered = { text: `Template "${c.wa_template}" with: ${((c.wa_params as string[] | null) ?? []).map((p) => render(p, sample.merge)).join(' | ')}` };
+  if (sample && c.channel === 'whatsapp') rendered = { text: `Template "${c.wa_template}" with: ${((c.wa_params as string[] | null) ?? []).map((p) => render(p, sample.merge)).join(' | ')}${c.wa_header ? ` + ${String((c.wa_header as WaHeader).format).toLowerCase()} header` : ''}` };
   if (sample && c.channel === 'voice') rendered = { text: describe(speech((await settings(ws)).sender_name ?? '', c.body, sample.merge, (c.voice_clip ? { id: c.voice_clip, name: c.voice_clip_name ?? 'own recording' } : null))) };
   return { eligible: a.eligible.length, excluded: a.excluded, credits: a.eligible.length * creditsPer(c.channel), balance: await balance(ws), sample: rendered, audience: a };
 }
@@ -316,6 +317,14 @@ on('POST', '/api/campaigns/:id/launch', async ({ req, m, ctx }) => {
   } else {
     if (!c.wa_template) throw new HttpError(400, 'Choose an approved WhatsApp template first.');
     if ((await waConfig(ctx.workspaceId)).mode === 'disabled') throw new HttpError(400, 'Connect WhatsApp in Settings → Sending first.');
+    // Meta rejects (#132012) a template send whose header or variables differ from the approved template, so check before spending credits
+    const info = (await listWaTemplates(ctx.workspaceId)).templates.find((t) => t.name === c.wa_template && t.language === c.wa_language) ?? null;
+    if (info?.unsupported) throw new HttpError(400, `Template "${info.name}" cannot be sent from here: ${info.unsupported}.`);
+    const header = c.wa_header as WaHeader | null;
+    if (info?.header_format && !header) throw new HttpError(400, `Template "${info.name}" has an ${info.header_format.toLowerCase()} header. Add a public https link to the ${info.header_format.toLowerCase()} first.`);
+    if (info?.header_format && header && header.format !== info.header_format) throw new HttpError(400, `Template "${info.name}" needs an ${info.header_format.toLowerCase()} header, not ${header.format.toLowerCase()}.`);
+    if (info && !info.header_format && header) throw new HttpError(400, `Template "${info.name}" has no media header. Remove the header link.`);
+    if (info && ((c.wa_params as string[] | null) ?? []).length !== info.params) throw new HttpError(400, `Template "${info.name}" takes ${info.params} variable(s). Re-select the template to refill them.`);
   }
   const pv = await preview(c, ctx.workspaceId);
   if (!pv.eligible) throw new HttpError(400, c.channel === 'whatsapp' ? 'No recipient has a Bangladeshi mobile number for WhatsApp (or all opted out).' : c.channel === 'voice' ? 'No recipient has a usable Bangladeshi phone number.' : 'No recipient has a usable email address.');

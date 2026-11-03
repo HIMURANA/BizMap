@@ -307,3 +307,5 @@ CREATE TABLE IF NOT EXISTS voice_clips (
   PRIMARY KEY (workspace_id, id)
 );
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS voice_clip text; -- set: this recording is played instead of the text-to-speech message
+-- WhatsApp templates with a media header (IMAGE / VIDEO / DOCUMENT): {"format":"IMAGE","url":"https://…"} sent as the header component
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS wa_header jsonb;
