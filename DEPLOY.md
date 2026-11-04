@@ -96,6 +96,7 @@ Optional:
 - Email: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (or `SMTP_URL`), `MAIL_FROM`. Without SMTP, emails are only captured in the in-app Outbox.
 - Payments: `SSLC_STORE_ID`, `SSLC_STORE_PASSWORD`, `SSLC_LIVE=1`. Without them a fake test gateway is used.
 - `TRIAL_CREDITS`, `ALLOW_SIGNUP`, `BILLING_PACKS`.
+- `PLATFORM_ADMIN_EMAILS=a@x.com,b@x.com`: these accounts get the **Platform admin** menu (`/admin`): all workspaces, users, credits, suspend/delete and an audit log. The list is applied at every API start, so remove an email and restart to revoke. The account must already exist (sign up first).
 - `WORKERS=0` on any extra API server, so campaigns are never sent twice (only one process should run the workers).
 
 Notes:

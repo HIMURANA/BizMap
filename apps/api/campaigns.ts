@@ -108,11 +108,13 @@ function senderProblem(s: Settings): string | null {
   return null;
 }
 
+const SUSPENDED = 'This workspace has been suspended. Contact support to send campaigns again.';
+
 // ------------------------------------------------------------------ worker step (called by workers.ts)
 export async function processCampaigns(): Promise<void> {
   await q(`UPDATE campaigns SET status = 'sending' WHERE status = 'scheduled' AND send_at <= now()`);
   const active = await q<{ id: string; workspace_id: string; channel: Channel; subject: string; body: string; wa_template: string; wa_language: string; wa_params: string[] | null; wa_header: WaHeader | null; voice_name: string | null; voice_clip: string | null }>(
-    `SELECT id, workspace_id, channel, subject, body, wa_template, wa_language, wa_params, wa_header, voice_name, voice_clip FROM campaigns WHERE status = 'sending' ORDER BY launched_at`);
+    `SELECT id, workspace_id, channel, subject, body, wa_template, wa_language, wa_params, wa_header, voice_name, voice_clip FROM campaigns c WHERE status = 'sending' AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.id = c.workspace_id AND w.suspended_at IS NOT NULL) ORDER BY launched_at`);
   for (const c of active) {
     const s = await settings(c.workspace_id);
     if (c.channel === 'voice') {
@@ -304,6 +306,7 @@ on('POST', '/api/campaigns/:id/test', async ({ req, m, ctx }) => {
 });
 on('POST', '/api/campaigns/:id/launch', async ({ req, m, ctx }) => {
   need(ctx, 'admin');
+  if (ctx.workspaceSuspended) throw new HttpError(403, SUSPENDED);
   const c = await getCampaign(m[1]!, ctx.workspaceId);
   if (c.status !== 'draft') throw new HttpError(409, 'This campaign was already launched.');
   const b = await body(req);
@@ -345,6 +348,7 @@ on('POST', '/api/campaigns/:id/launch', async ({ req, m, ctx }) => {
 for (const [action, from, to] of [['pause', ['sending', 'scheduled'], 'paused'], ['resume', ['paused'], 'sending'], ['cancel', ['sending', 'scheduled', 'paused'], 'cancelled']] as const) {
   on('POST', `/api/campaigns/:id/${action}`, async ({ m, ctx }) => {
     need(ctx, 'admin');
+    if (action === 'resume' && ctx.workspaceSuspended) throw new HttpError(403, SUSPENDED);
     const c = await getCampaign(m[1]!, ctx.workspaceId);
     if (!(from as readonly string[]).includes(c.status)) throw new HttpError(409, `Cannot ${action} a ${c.status} campaign.`);
     await q(`UPDATE campaigns SET status = $2${to === 'cancelled' ? ', finished_at = now()' : ''} WHERE id = $1`, [c.id, to]);

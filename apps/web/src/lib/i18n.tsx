@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 type Lang = 'en' | 'bn';
 const STR = {
   explore: ['Explore', 'খুঁজুন'], lists: ['Lists', 'তালিকা'], exports: ['Exports', 'এক্সপোর্ট'], campaigns: ['Campaigns', 'ক্যাম্পেইন'],
-  inbox: ['Inbox', 'ইনবক্স'], reports: ['Reports', 'রিপোর্ট'], alerts: ['Alerts', 'সতর্কতা'], settings: ['Settings', 'সেটিংস'],
+  admin: ['Platform admin', 'প্ল্যাটফর্ম অ্যাডমিন'], inbox: ['Inbox', 'ইনবক্স'], reports: ['Reports', 'রিপোর্ট'], alerts: ['Alerts', 'সতর্কতা'], settings: ['Settings', 'সেটিংস'],
   search_placeholder: ['Search name or phone…', 'নাম বা ফোন নম্বর লিখুন…'], filters: ['Filters', 'ফিল্টার'], reset: ['Reset', 'রিসেট'],
   location: ['Location', 'অবস্থান'], category: ['Category', 'ক্যাটাগরি'], contact: ['Contact details', 'যোগাযোগ'], quality: ['Data quality', 'ডেটার মান'],
   source: ['Source', 'উৎস'], advanced: ['Advanced', 'অন্যান্য'], division: ['Division', 'বিভাগ'], district: ['District', 'জেলা'], upazila: ['Upazila / thana', 'উপজেলা / থানা'],

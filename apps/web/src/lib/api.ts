@@ -37,7 +37,7 @@ export interface SavedView { id: string; name: string; query: string; created_at
 export interface ExportPreset { id: string; label: string; cols: string[]; paid: boolean }
 export interface ExportRecord { id: string; name: string; format: string; preset: string; query: string; rows: number; credits: number; created_at: string }
 export type Role = 'owner' | 'admin' | 'member';
-export interface Me { user: { id: string; email: string; name: string }; workspace: { id: string; name: string; role: Role } | null; workspaces: { id: string; name: string; role: Role }[]; credits: number }
+export interface Me { user: { id: string; email: string; name: string }; workspace: { id: string; name: string; role: Role; suspended: boolean } | null; workspaces: { id: string; name: string; role: Role; suspended: boolean }[]; credits: number; platform_admin: boolean }
 export interface Team { members: { id: string; name: string; email: string; role: Role; created_at: string; last_login_at: string | null }[]; invites: { id: string; email: string; role: Role; created_at: string; expires_at: string }[]; me: string; role: Role }
 export interface InviteInfo { workspace: string; email: string; role: Role; valid: boolean; has_account: boolean }
 export interface Billing {

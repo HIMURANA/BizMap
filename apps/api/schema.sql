@@ -309,3 +309,17 @@ CREATE TABLE IF NOT EXISTS voice_clips (
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS voice_clip text; -- set: this recording is played instead of the text-to-speech message
 -- WhatsApp templates with a media header (IMAGE / VIDEO / DOCUMENT): {"format":"IMAGE","url":"https://…"} sent as the header component
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS wa_header jsonb;
+
+-- ------------------------------------------------------------------ platform admin (admin.ts)
+-- is_platform_admin is set from PLATFORM_ADMIN_EMAILS at every API start (the env var is the single source of truth)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_platform_admin boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at timestamptz;          -- set: cannot sign in, sessions are removed
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS suspended_at timestamptz;    -- set: cannot launch or resume campaigns, workers skip it
+-- every platform-admin action; no foreign key on workspace_id so the record outlives a deleted workspace
+CREATE TABLE IF NOT EXISTS platform_audit (
+  id bigserial PRIMARY KEY,
+  admin_id uuid REFERENCES users(id) ON DELETE SET NULL, admin_email text NOT NULL,
+  action text NOT NULL, workspace_id uuid, target text, detail jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS platform_audit_created_idx ON platform_audit (created_at DESC);

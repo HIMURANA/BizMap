@@ -21,6 +21,7 @@ import './campaigns.js';
 import './calls.js';
 import './whatsapp.js';
 import './waTemplates.js';
+import { syncPlatformAdmins } from './admin.js';
 import './alerts.js';
 import './contacts.js';
 import { startWorkers } from './workers.js';
@@ -43,9 +44,9 @@ async function createWorkspace(c: pg.Pool | pg.PoolClient, userId: string, name:
 }
 
 async function me(ctx: Ctx) {
-  const workspaces = await q(`SELECT w.id, w.name, m.role FROM memberships m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = $1 ORDER BY w.created_at`, [ctx.userId]);
+  const workspaces = await q(`SELECT w.id, w.name, m.role, (w.suspended_at IS NOT NULL) AS suspended FROM memberships m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = $1 ORDER BY w.created_at`, [ctx.userId]);
   return { user: { id: ctx.userId, email: ctx.email, name: ctx.name }, workspace: workspaces.find((w) => w.id === ctx.workspaceId) ?? null, workspaces,
-    credits: ctx.workspaceId ? await balance(ctx.workspaceId) : 0 };
+    credits: ctx.workspaceId ? await balance(ctx.workspaceId) : 0, platform_admin: ctx.platformAdmin };
 }
 
 async function inviteByToken(token: string) {
@@ -242,10 +243,11 @@ on('POST', '/api/auth/login', async ({ req, res }) => {
   const email = str(b.email, 254).toLowerCase(), pw = typeof b.password === 'string' ? b.password : '';
   const keys = [`e:${email}`, `ip:${clientIp(req)}`];
   if (loginBlocked(keys)) throw new HttpError(429, 'Too many failed attempts. Wait 15 minutes and try again.');
-  const u = await one<{ id: string; password_hash: string }>(`SELECT id, password_hash FROM users WHERE lower(email) = $1`, [email]);
+  const u = await one<{ id: string; password_hash: string; disabled_at: Date | null }>(`SELECT id, password_hash, disabled_at FROM users WHERE lower(email) = $1`, [email]);
   const ok = u ? await verifyPassword(pw, u.password_hash) : await dummyVerify(pw);
   if (!u || !ok) { recordLoginFailure(keys); throw new HttpError(401, 'Email or password is incorrect.'); }
   clearLoginFailures(keys);
+  if (u.disabled_at) throw new HttpError(403, 'This account has been disabled. Contact support.'); // said only after the password is right, so it reveals nothing to a guesser
   const ws = await one<{ workspace_id: string }>(`SELECT workspace_id FROM memberships WHERE user_id = $1 ORDER BY created_at LIMIT 1`, [u.id]);
   await createSession(req, res, u.id, ws?.workspace_id ?? null);
   return { ok: true };
@@ -532,6 +534,8 @@ createServer(async (req, res) => {
 }).listen(PORT, '127.0.0.1', async () => {
   try {
     await migrate();
+    const admins = await syncPlatformAdmins();
+    if (admins) console.log(`Platform admins: ${admins} email(s) in PLATFORM_ADMIN_EMAILS`);
     startWorkers();
     const n = (await one<{ n: number }>(`SELECT COUNT(*)::int n FROM biz`))?.n ?? 0;
     console.log(`BizMap API on http://127.0.0.1:${PORT} · ${n.toLocaleString()} businesses in Postgres${n ? '' : ' (empty: run npm run pg:sync)'} · payments: ${PAY_MODE}`);

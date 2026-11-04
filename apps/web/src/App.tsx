@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Compass, ListChecks, FileDown, Mail, Inbox, BarChart3, Bell, Settings, Coins, Languages, MapPinned, LogOut, ChevronsUpDown, Check, PhoneCall, type LucideIcon } from 'lucide-react';
+import { Compass, ListChecks, FileDown, Mail, Inbox, BarChart3, Bell, Settings, Coins, Languages, MapPinned, LogOut, ChevronsUpDown, Check, PhoneCall, ShieldCheck, AlertTriangle, type LucideIcon } from 'lucide-react';
 import { ApiError, api, type Me } from './lib/api';
 import { Link, navigate, useLocation } from './lib/router';
 import { useI18n, type Key } from './lib/i18n';
@@ -13,6 +13,7 @@ import { CampaignDetail, CampaignNew, CampaignsPage } from './pages/CampaignPage
 import { CallWork, CallsPage } from './pages/CallPages';
 import { InboxPage } from './pages/InboxPages';
 import { AlertsPage } from './pages/AlertsPage';
+import { AdminPage } from './pages/AdminPages';
 import { out } from './lib/outreach';
 import { Button, Spinner, cx } from './components/ui';
 
@@ -28,6 +29,8 @@ const NAV: { to: string; key: Key; icon: LucideIcon; mobile?: boolean; badge?: '
   { to: '/alerts', key: 'alerts', icon: Bell, badge: 'alerts' },
   { to: '/settings/team', key: 'settings', icon: Settings, mobile: true },
 ];
+/** Only platform admins (DigitalLeon staff) get this entry; the server also refuses everyone else. */
+const ADMIN_NAV: (typeof NAV)[number] = { to: '/admin', key: 'admin', icon: ShieldCheck };
 
 export function App() {
   const { path, search } = useLocation();
@@ -126,6 +129,7 @@ function Shell({ me }: { me: Me }) {
   else if (path.startsWith('/calls/')) page = <CallWork id={path.slice('/calls/'.length)} />;
   else if (path === '/inbox' || path === '/inbox/optins') page = <InboxPage />;
   else if (path === '/alerts') page = <AlertsPage />;
+  else if (path.startsWith('/admin') && me.platform_admin) page = <AdminPage />;
   else if (path !== '/') page = <PlannedPage which={path.slice(1)} />;
   else page = <Explore meta={meta} />;
 
@@ -134,7 +138,7 @@ function Shell({ me }: { me: Me }) {
       <nav className="order-last flex shrink-0 justify-around border-t border-slate-200 bg-white print:hidden dark:border-slate-800 dark:bg-slate-900 md:order-first md:w-56 md:flex-col md:justify-start md:border-r md:border-t-0">
         <div className="hidden p-2 md:block"><WorkspaceMenu me={me} /></div>
         <div className="flex flex-1 justify-around md:flex-col md:justify-start md:gap-0.5 md:px-2">
-          {NAV.map((n) => (
+          {(me.platform_admin ? [...NAV, ADMIN_NAV] : NAV).map((n) => (
             <Link key={n.to} to={n.to} className={cx('flex flex-col items-center gap-0.5 px-2 py-2 text-[10px] font-medium md:flex-row md:gap-2.5 md:rounded-lg md:px-3 md:text-sm',
               active(n.to) ? 'text-brand-700 md:bg-brand-50 dark:text-brand-100 md:dark:bg-brand-500/15' : 'text-slate-500 hover:text-slate-900 md:hover:bg-slate-100 dark:hover:text-white md:dark:hover:bg-slate-800',
               !n.mobile && 'hidden md:flex')}>
@@ -158,7 +162,10 @@ function Shell({ me }: { me: Me }) {
           {meta && <p className="px-1 text-[10px] leading-snug text-slate-400">{meta.attribution}</p>}
         </div>
       </nav>
-      <main className="min-h-0 min-w-0 flex-1">{page}</main>
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {me.workspace?.suspended && <div className="flex shrink-0 items-center gap-2 bg-rose-600 px-4 py-2 text-sm text-white"><AlertTriangle className="size-4 shrink-0" />This workspace is suspended: campaigns are paused and cannot be launched. Contact support.</div>}
+        <div className="min-h-0 flex-1">{page}</div>
+      </main>
     </div>
   );
 }

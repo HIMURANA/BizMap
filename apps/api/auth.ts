@@ -75,19 +75,24 @@ export async function createSession(req: IncomingMessage, res: ServerResponse, u
 export interface Ctx {
   sessionId: string; userId: string; email: string; name: string;
   workspaceId: string | null; role: 'owner' | 'admin' | 'member' | null;
+  /** DigitalLeon staff: may use the /api/admin routes. Set only from PLATFORM_ADMIN_EMAILS. */
+  platformAdmin: boolean;
+  /** The current workspace was suspended by a platform admin. */
+  workspaceSuspended: boolean;
 }
 
 /** Resolves the session cookie to a user and current workspace (null when signed out or expired). */
 export async function getCtx(req: IncomingMessage): Promise<Ctx | null> {
   const token = parseCookies(req)[COOKIE];
   if (!token) return null;
-  const row = await one<{ id: string; user_id: string; email: string; name: string; workspace_id: string | null; role: Ctx['role'] }>(
-    `SELECT s.id, s.user_id, u.email, u.name, m.workspace_id, m.role
+  const row = await one<{ id: string; user_id: string; email: string; name: string; workspace_id: string | null; role: Ctx['role']; platform_admin: boolean; suspended: boolean }>(
+    `SELECT s.id, s.user_id, u.email, u.name, m.workspace_id, m.role, u.is_platform_admin AS platform_admin, (w.suspended_at IS NOT NULL) AS suspended
      FROM sessions s JOIN users u ON u.id = s.user_id
      LEFT JOIN memberships m ON m.user_id = s.user_id AND m.workspace_id = s.workspace_id
-     WHERE s.id = $1 AND s.expires_at > now()`, [sha256(token)]);
+     LEFT JOIN workspaces w ON w.id = m.workspace_id
+     WHERE s.id = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, [sha256(token)]);
   if (!row) return null;
-  return { sessionId: row.id, userId: row.user_id, email: row.email, name: row.name, workspaceId: row.workspace_id, role: row.role };
+  return { sessionId: row.id, userId: row.user_id, email: row.email, name: row.name, workspaceId: row.workspace_id, role: row.role, platformAdmin: row.platform_admin, workspaceSuspended: !!row.suspended };
 }
 
 export const ROLE_RANK = { member: 1, admin: 2, owner: 3 } as const;
