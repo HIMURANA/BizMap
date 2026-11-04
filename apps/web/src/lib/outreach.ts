@@ -26,6 +26,17 @@ export interface Preview {
 export type WaMediaFormat = 'IMAGE' | 'VIDEO' | 'DOCUMENT';
 export interface WaHeader { format: WaMediaFormat; url: string }
 export interface WaTemplate { name: string; language: string; category: string; body: string; params: number; header_format: WaMediaFormat | null; unsupported: string | null }
+/** A template of the WhatsApp account with its Meta review status (APPROVED, PENDING, REJECTED, PAUSED…). */
+export interface WaTemplateRow {
+  id: string; name: string; language: string; category: string; status: string; rejected_reason: string | null;
+  body: string; header_format: string | null; footer: string | null; buttons: { type: string; text: string }[];
+}
+export type WaButton = { type: 'QUICK_REPLY'; text: string } | { type: 'URL'; text: string; url: string } | { type: 'PHONE_NUMBER'; text: string; phone_number: string };
+export interface WaTemplateDraft {
+  name: string; language: string; category: 'MARKETING' | 'UTILITY';
+  header: { format: 'NONE' } | { format: 'TEXT'; text: string } | { format: 'IMAGE'; url: string };
+  body: string; examples: string[]; footer: string; buttons: WaButton[];
+}
 export interface SendingSettings {
   sender_name: string | null; sender_email: string | null; reply_to: string | null; postal_address: string | null;
   daily_email_cap: number; call_hours_start: number; call_hours_end: number; mail_mode: 'smtp' | 'test' | 'disabled';
@@ -96,6 +107,9 @@ export const out = {
   launch: (id: string, send_at?: string) => send<{ recipients: number }>(`/campaigns/${id}/launch`, 'POST', { send_at }),
   campaignAction: (id: string, action: 'pause' | 'resume' | 'cancel') => send(`/campaigns/${id}/${action}`, 'POST', {}),
   templates: () => req<{ mode: string; templates: WaTemplate[] }>('/whatsapp/templates'),
+  allTemplates: () => req<{ mode: string; templates: WaTemplateRow[] }>('/whatsapp/templates/all'),
+  createTemplate: (b: WaTemplateDraft) => send<{ id: string | null; status: string }>('/whatsapp/templates', 'POST', b),
+  deleteTemplate: (name: string) => send(`/whatsapp/templates/${encodeURIComponent(name)}`, 'DELETE', {}),
 
   queues: () => req<CallQueue[]>('/calls/queues'),
   queue: (id: string) => req<CallQueueDetail>(`/calls/queues/${id}`),

@@ -9,6 +9,7 @@ import { Link, navigate, useLocation } from '../lib/router';
 import { ContactImport } from '../components/ContactImport';
 import { Badge, Button, Empty, Modal, Spinner, cx } from '../components/ui';
 import { confirmAction } from '../components/feedback';
+import { TemplatesTab } from './WaTemplates';
 
 const card = 'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
 const input = 'h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900';
@@ -50,7 +51,8 @@ const VOICE_SAMPLE = 'আমরা {{area}} এলাকার ব্যবস�
 // ------------------------------------------------------------------ list
 export function CampaignsPage() {
   const { search } = useLocation();
-  const tab = new URLSearchParams(search).get('tab') === 'outbox' ? 'outbox' : 'campaigns';
+  const tabParam = new URLSearchParams(search).get('tab');
+  const tab = tabParam === 'outbox' || tabParam === 'templates' ? tabParam : 'campaigns';
   const { data, isLoading } = useQuery({ queryKey: ['campaigns'], queryFn: out.campaigns, refetchInterval: 10_000 });
   const meta = useQuery({ queryKey: ['campaign-meta'], queryFn: out.campaignMeta });
   return (
@@ -58,11 +60,11 @@ export function CampaignsPage() {
       actions={<div className="flex flex-wrap gap-2"><Button onClick={() => navigate('/campaigns/new?channel=voice')}><PhoneCall className="size-4" />Auto call</Button><Button onClick={() => navigate('/campaigns/new?channel=whatsapp')}><MessageCircle className="size-4" />WhatsApp</Button><Button variant="primary" onClick={() => navigate('/campaigns/new?channel=email')}><Plus className="size-4" />Email campaign</Button></div>}>
       {meta.data?.mail_mode === 'test' && <TestModeBanner what="emails are captured in the Outbox instead of being sent. Add SMTP_URL to .env to send for real." />}
       <div className="mb-4 flex gap-1 border-b border-slate-200 dark:border-slate-800">
-        {[['campaigns', 'Campaigns'], ['outbox', 'Outbox']].map(([k, l]) => (
-          <Link key={k} to={k === 'campaigns' ? '/campaigns' : '/campaigns?tab=outbox'} className={cx('-mb-px border-b-2 px-3 py-2 text-sm font-medium', tab === k ? 'border-brand-600 text-brand-700 dark:text-brand-100' : 'border-transparent text-slate-500')}>{l}</Link>
+        {[['campaigns', 'Campaigns'], ['templates', 'WhatsApp templates'], ['outbox', 'Outbox']].map(([k, l]) => (
+          <Link key={k} to={k === 'campaigns' ? '/campaigns' : `/campaigns?tab=${k}`} className={cx('-mb-px border-b-2 px-3 py-2 text-sm font-medium', tab === k ? 'border-brand-600 text-brand-700 dark:text-brand-100' : 'border-transparent text-slate-500')}>{l}</Link>
         ))}
       </div>
-      {tab === 'outbox' ? <Outbox /> : (
+      {tab === 'outbox' ? <Outbox /> : tab === 'templates' ? <TemplatesTab /> : (
         <>
           {isLoading && <Spinner />}
           {data?.length === 0 && <div className={card}><Empty icon={<Send className="size-10" />} title="No campaigns yet">Build a list in Explore, then start an email or WhatsApp campaign for it.</Empty></div>}

@@ -46,7 +46,7 @@ export async function waConfig(ws: string) {
   };
 }
 
-async function graph(token: string, path: string, init?: RequestInit) {
+export async function graph(token: string, path: string, init?: RequestInit) {
   const res = await fetch(`${GRAPH}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(init?.headers ?? {}) } });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: { message?: string; code?: number } };
   if (!res.ok) throw Object.assign(new Error(`WhatsApp API: ${data.error?.message ?? res.status}`), { waCode: data.error?.code });

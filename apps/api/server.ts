@@ -20,6 +20,7 @@ import { HttpError, balance, body, json, need, on, rawBody, redirect, routes, st
 import './campaigns.js';
 import './calls.js';
 import './whatsapp.js';
+import './waTemplates.js';
 import './alerts.js';
 import './contacts.js';
 import { startWorkers } from './workers.js';
