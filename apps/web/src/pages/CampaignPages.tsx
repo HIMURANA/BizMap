@@ -155,7 +155,8 @@ function Editor({ initial, id }: { initial: Draft; id?: string }) {
   const sending = useQuery({ queryKey: ['sending'], queryFn: out.sending, enabled: d.channel === 'email' });
   const templates = useQuery({ queryKey: ['wa-templates'], queryFn: out.templates, enabled: d.channel === 'whatsapp' });
   const tpl = templates.data?.templates.find((t) => t.name === d.wa_template);
-  useEffect(() => { if (tpl && d.wa_params.length !== tpl.params) set({ wa_params: Array.from({ length: tpl.params }, (_, i) => d.wa_params[i] ?? (i === 0 ? '{{name}}' : '{{area}}')), wa_language: tpl.language }); }, [tpl?.name]);
+  // The language must always follow the chosen template (Meta rejects a template sent in a language it was not approved in, #132001), even when its variable count already matches.
+  useEffect(() => { if (tpl) set({ wa_language: tpl.language, ...(d.wa_params.length !== tpl.params ? { wa_params: Array.from({ length: tpl.params }, (_, i) => d.wa_params[i] ?? (i === 0 ? '{{name}}' : '{{area}}')) } : {}) }); }, [tpl?.name]);
 
   const payload = () => ({
     channel: d.channel, name: d.name.trim(), audience_list: d.audience.startsWith('list:') ? d.audience.slice(5) : null, audience_query: d.audience.startsWith('query:') ? d.audience.slice(6) : null,
