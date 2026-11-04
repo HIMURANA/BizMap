@@ -89,15 +89,58 @@ on('GET', '/api/admin/workspaces', async ({ p, ctx }) => {
 on('GET', '/api/admin/workspaces/:id', async ({ m, ctx }) => {
   needPlatform(ctx);
   const w = await getWorkspace(uuid(m[1]));
-  const [members, ledger, campaigns, payments, settings] = await Promise.all([
+  const [members, ledger, campaigns, payments, settings, data] = await Promise.all([
     q(`SELECT u.id, u.name, u.email, ms.role, u.last_login_at, u.disabled_at FROM memberships ms JOIN users u ON u.id = ms.user_id WHERE ms.workspace_id = $1 ORDER BY ms.created_at`, [w.id]),
     q(`SELECT l.id, l.delta, l.reason, l.ref, l.created_at, u.name AS by FROM credit_ledger l LEFT JOIN users u ON u.id = l.user_id WHERE l.workspace_id = $1 ORDER BY l.id DESC LIMIT 100`, [w.id]),
     q(`SELECT id, name, channel, status, recipients, credits, created_at FROM campaigns WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 20`, [w.id]),
     q(`SELECT tran_id, pack, amount_bdt::float AS amount_bdt, credits, status, provider, created_at, paid_at FROM payments WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 20`, [w.id]),
     one<{ wa_phone_number_id: string | null; wa_waba_id: string | null; has_token: boolean; sender_email: string | null; daily_email_cap: number }>(
       `SELECT wa_phone_number_id, wa_waba_id, (wa_token_enc IS NOT NULL) AS has_token, sender_email, daily_email_cap FROM workspace_settings WHERE workspace_id = $1`, [w.id]),
+    dataCounts(w.id),
   ]);
-  return { ...w, balance: await balanceOf(w.id), members, ledger, campaigns, payments, settings: settings ?? null };
+  return { ...w, balance: await balanceOf(w.id), members, ledger, campaigns, payments, settings: settings ?? null, data };
+});
+
+// ------------------------------------------------------------------ data cleanup (campaigns, inbox, outbox, call logs)
+const PURGE_WHAT = ['campaigns', 'inbox', 'outbox', 'calls'] as const;
+type PurgeWhat = typeof PURGE_WHAT[number];
+
+/** How much of each kind of activity data a workspace holds (shown before an admin deletes it). */
+const dataCounts = (ws: string) => one(`SELECT
+    (SELECT count(*) FROM campaigns WHERE workspace_id = $1)::int AS campaigns,
+    (SELECT count(*) FROM campaigns WHERE workspace_id = $1 AND status IN ('sending', 'scheduled'))::int AS running_campaigns,
+    (SELECT count(*) FROM campaign_recipients r JOIN campaigns c ON c.id = r.campaign_id WHERE c.workspace_id = $1)::int AS recipients,
+    (SELECT count(*) FROM conversations WHERE workspace_id = $1)::int AS conversations,
+    (SELECT count(*) FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE c.workspace_id = $1)::int AS messages,
+    (SELECT count(*) FROM email_log WHERE workspace_id = $1)::int AS outbox,
+    (SELECT count(*) FROM call_queues WHERE workspace_id = $1)::int AS call_queues,
+    (SELECT count(*) FROM call_items i JOIN call_queues c ON c.id = i.queue_id WHERE c.workspace_id = $1)::int AS call_items`, [ws]);
+
+/**
+ * Permanently deletes one kind of activity data of a workspace. Credits already spent are not refunded.
+ *  campaigns: campaigns and their recipients (running or scheduled ones are kept: cancel them first);
+ *  inbox: WhatsApp conversations and messages;  outbox: the sent-email log;  calls: call queues and their call items.
+ * Contacts, lists, opt-ins and the do-not-contact list are never touched here.
+ */
+on('POST', '/api/admin/workspaces/:id/purge', async ({ req, m, ctx }) => {
+  needPlatform(ctx);
+  const w = await getWorkspace(uuid(m[1]));
+  const b = await body(req);
+  const what = PURGE_WHAT.find((x) => x === b.what) as PurgeWhat | undefined;
+  if (!what) throw new HttpError(400, 'Choose what to delete: campaigns, inbox, outbox or calls.');
+  if (str(b.confirm, 20).toLowerCase() !== 'delete') throw new HttpError(400, 'Type "delete" to confirm.');
+  const before = (await dataCounts(w.id))!;
+  const deleted = await tx(async (c) => {
+    if (what === 'campaigns') {
+      const r = await c.query(`DELETE FROM campaigns WHERE workspace_id = $1 AND status NOT IN ('sending', 'scheduled')`, [w.id]);
+      return { campaigns: r.rowCount ?? 0, kept_running: before.running_campaigns };
+    }
+    if (what === 'inbox') return { conversations: (await c.query(`DELETE FROM conversations WHERE workspace_id = $1`, [w.id])).rowCount ?? 0, messages: before.messages };
+    if (what === 'outbox') return { emails: (await c.query(`DELETE FROM email_log WHERE workspace_id = $1`, [w.id])).rowCount ?? 0 };
+    return { call_queues: (await c.query(`DELETE FROM call_queues WHERE workspace_id = $1`, [w.id])).rowCount ?? 0, call_items: before.call_items };
+  });
+  await audit(ctx, `data.purge_${what}`, { workspaceId: w.id, target: w.name, detail: deleted });
+  return { ok: true, deleted };
 });
 
 on('PATCH', '/api/admin/workspaces/:id', async ({ req, m, ctx }) => {

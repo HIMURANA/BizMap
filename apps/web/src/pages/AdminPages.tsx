@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Coins, Search } from 'lucide-react';
-import { admin, type AdminWorkspace } from '../lib/admin';
+import { admin, type AdminDataCounts, type AdminWorkspace, type PurgeWhat } from '../lib/admin';
 import { type Role } from '../lib/api';
 import { Link, navigate, useLocation } from '../lib/router';
 import { Badge, Button, Modal, Spinner, cx } from '../components/ui';
@@ -215,6 +215,7 @@ function WorkspaceDetail({ id }: { id: string }) {
     void qc.invalidateQueries({ queryKey: ['me'] }); // the sidebar balance and suspended banner come from the signed-in user's own workspace
   };
   const [modal, setModal] = useState<'credits' | 'suspend' | 'rename' | 'delete' | null>(null);
+  const [purge, setPurge] = useState<PurgeWhat | null>(null);
   const unsuspend = useMutation({ mutationFn: () => admin.unsuspend(id), onSuccess: refresh });
   const disconnect = useMutation({ mutationFn: () => admin.disconnectWhatsApp(id), onSuccess: refresh });
   const setRole = useMutation({ mutationFn: (a: { userId: string; role: Role }) => admin.setRole(id, a.userId, a.role), onSuccess: () => { toast('Role changed'); refresh(); }, onError: (e: Error) => toast(e.message, 'error') });
@@ -268,6 +269,24 @@ function WorkspaceDetail({ id }: { id: string }) {
         </Table>
       </Section>
 
+      <Section title="Data cleanup">
+        <div className={cx(card, 'divide-y divide-slate-100 dark:divide-slate-800')}>
+          {PURGES.map((p) => (
+            <div key={p.what} className="flex flex-wrap items-center gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1"><div className="text-sm font-medium">{p.label}</div><div className="text-xs text-slate-500">{p.summary(w.data)}</div></div>
+              <Button size="sm" variant="danger" disabled={!p.count(w.data)} onClick={() => setPurge(p.what)}>Delete…</Button>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-slate-500">Permanent. Credits already spent are not refunded. Contacts, lists, opt-ins and the do-not-contact list are never deleted here.</p>
+      </Section>
+
+      {PURGES.map((p) => (
+        <TextModal key={p.what} open={purge === p.what} title={`Delete ${p.label.toLowerCase()} of ${w.name}`} label='Type "delete" to confirm' hint={`${p.summary(w.data)}. ${p.warning}`} action="Delete forever" danger
+          onClose={() => setPurge(null)} run={(v) => admin.purge(id, p.what, v)}
+          onDone={() => { setPurge(null); refresh(); toast(`${p.label} deleted`); }} />
+      ))}
+
       <CreditsModal open={modal === 'credits'} w={w} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} />
       <TextModal open={modal === 'rename'} title="Rename workspace" label="Workspace name" initial={w.name} action="Save" onClose={() => setModal(null)}
         run={(v) => admin.rename(id, v)} onDone={() => { setModal(null); refresh(); toast('Renamed'); }} />
@@ -278,6 +297,17 @@ function WorkspaceDetail({ id }: { id: string }) {
     </Page>
   );
 }
+
+const pl = (count: number, word: string) => `${n(count)} ${word}${count === 1 ? '' : 's'}`;
+const PURGES: { what: PurgeWhat; label: string; count: (d: AdminDataCounts) => number; summary: (d: AdminDataCounts) => string; warning: string }[] = [
+  { what: 'campaigns', label: 'Campaigns', count: (d) => d.campaigns - d.running_campaigns,
+    summary: (d) => `${pl(d.campaigns, 'campaign')} with ${pl(d.recipients, 'recipient')}${d.running_campaigns ? ` (${d.running_campaigns} running or scheduled ${d.running_campaigns === 1 ? 'is' : 'are'} kept: cancel ${d.running_campaigns === 1 ? 'it' : 'them'} first)` : ''}`,
+    warning: 'Campaign reports and per-recipient delivery results are lost.' },
+  { what: 'inbox', label: 'Inbox', count: (d) => d.conversations, summary: (d) => `${pl(d.conversations, 'conversation')}, ${pl(d.messages, 'message')}`,
+    warning: 'Customers can still write again; a new conversation starts then.' },
+  { what: 'outbox', label: 'Outbox (email log)', count: (d) => d.outbox, summary: (d) => `${pl(d.outbox, 'sent or captured email')}`, warning: 'The email log cannot be restored.' },
+  { what: 'calls', label: 'Call logs', count: (d) => d.call_queues, summary: (d) => `${pl(d.call_queues, 'call queue')}, ${pl(d.call_items, 'call')} with their outcomes and notes`, warning: 'Call outcomes and notes are lost.' },
+];
 
 const Section = ({ title, children }: { title: string; children: ReactNode }) => <div className="mb-6"><h2 className="mb-2 text-sm font-medium">{title}</h2>{children}</div>;
 

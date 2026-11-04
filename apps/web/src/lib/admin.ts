@@ -19,7 +19,13 @@ export interface AdminWorkspace {
   campaigns: { id: string; name: string; channel: string; status: string; recipients: number; credits: number; created_at: string }[];
   payments: { tran_id: string; pack: string; amount_bdt: number; credits: number; status: string; provider: string; created_at: string; paid_at: string | null }[];
   settings: { wa_phone_number_id: string | null; wa_waba_id: string | null; has_token: boolean; sender_email: string | null; daily_email_cap: number } | null;
+  data: AdminDataCounts;
 }
+/** Activity data a workspace holds, which an admin can delete per kind. */
+export interface AdminDataCounts {
+  campaigns: number; running_campaigns: number; recipients: number; conversations: number; messages: number; outbox: number; call_queues: number; call_items: number;
+}
+export type PurgeWhat = 'campaigns' | 'inbox' | 'outbox' | 'calls';
 export interface AdminUserRow { id: string; name: string; email: string; created_at: string; last_login_at: string | null; disabled_at: string | null; is_platform_admin: boolean; workspaces: number }
 export interface AdminUser extends Omit<AdminUserRow, 'workspaces'> {
   workspaces: { id: string; name: string; role: Role; suspended_at: string | null }[]; sessions: number;
@@ -39,6 +45,7 @@ export const admin = {
   adjustCredits: (id: string, delta: number, reason: string) => send<{ balance: number }>(`/admin/workspaces/${id}/credits`, 'POST', { delta, reason }),
   disconnectWhatsApp: (id: string) => send(`/admin/workspaces/${id}/disconnect-whatsapp`, 'POST', {}),
   setRole: (id: string, userId: string, role: Role) => send(`/admin/workspaces/${id}/members/${userId}`, 'PATCH', { role }),
+  purge: (id: string, what: PurgeWhat, confirm: string) => send<{ deleted: Record<string, number> }>(`/admin/workspaces/${id}/purge`, 'POST', { what, confirm }),
   deleteWorkspace: (id: string, confirm: string) => send(`/admin/workspaces/${id}`, 'DELETE', { confirm }),
   users: (q: string) => req<AdminUserRow[]>(`/admin/users?q=${enc(q)}`),
   user: (id: string) => req<AdminUser>(`/admin/users/${id}`),
