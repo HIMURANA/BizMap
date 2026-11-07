@@ -75,7 +75,7 @@ export function CampaignsPage() {
                 <tbody>{data.map((c) => (
                   <tr key={c.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40" onClick={() => navigate(`/campaigns/${c.id}`)}>
                     <td className="px-4 py-3"><div className="flex items-center gap-2 font-medium"><ChannelIcon c={c.channel} />{c.name}</div></td>
-                    <td><Badge tone={STATUS_TONE[c.status]}>{c.status}</Badge></td>
+                    <td><CampaignStatusBadge c={c} sent={c.sent ?? 0} /></td>
                     <td className="hidden max-w-48 truncate text-slate-500 sm:table-cell">{audienceLabel(c)}</td>
                     <td className="text-right tabular-nums">{c.status === 'draft' ? '—' : `${(c.sent ?? 0).toLocaleString()} / ${c.recipients.toLocaleString()}`}</td>
                     <td className="hidden px-4 text-right text-slate-500 md:table-cell">{new Date(c.created_at).toLocaleDateString()}</td>
@@ -464,6 +464,11 @@ const VOICE_STATUS: Record<string, string> = {
 };
 /** A WhatsApp message still "sent" this long after sending has had no delivery report from Meta. */
 const NO_REPORT_MS = 10 * 60 * 1000;
+/** A campaign is finished once its queue is empty, but that alone is no success: say so when no message went out. */
+function CampaignStatusBadge({ c, sent, className }: { c: Campaign; sent: number; className?: string }) {
+  if (c.status === 'sent' && c.recipients > 0 && sent === 0) return <Badge tone="rose" className={className} title="No message went out. See the reason next to each recipient.">none sent</Badge>;
+  return <Badge tone={STATUS_TONE[c.status]} className={className} title={c.status === 'sent' && c.channel === 'email' ? "Your email provider accepted these. Whether they reached the inbox is shown in the provider's logs (e.g. Brevo → Transactional → Logs)." : undefined}>{c.status}</Badge>;
+}
 function CampaignView({ c }: { c: Campaign }) {
   const qc = useQueryClient();
   const act = useMutation({ mutationFn: (a: 'pause' | 'resume' | 'cancel') => out.campaignAction(c.id, a), onSuccess: () => { qc.invalidateQueries({ queryKey: ['campaign', c.id] }); qc.invalidateQueries({ queryKey: ['meta'] }); } });
@@ -473,11 +478,12 @@ function CampaignView({ c }: { c: Campaign }) {
   const pct = c.recipients ? Math.round((done / c.recipients) * 100) : 0;
   const capped = c.channel === 'email' && c.status === 'sending' && (stats.queued ?? 0) > 0;
   const total = useMemo(() => Math.max(1, c.recipients), [c.recipients]);
-  const label = (k: string) => (c.channel === 'voice' ? VOICE_STATUS[k] ?? k : k);
+  const label = (k: string) => (c.channel === 'voice' ? VOICE_STATUS[k] ?? k : c.channel === 'email' && k === 'sent' ? 'accepted by provider' : k);
+  const sent = (stats.sent ?? 0) + (stats.delivered ?? 0) + (stats.read ?? 0) + (stats.replied ?? 0);
   return (
     <Page back="/campaigns" title={<span className="flex items-center gap-2"><ChannelIcon c={c.channel} className="size-5" />{c.name}</span>}
       subtitle={<>{audienceLabel(c)} · launched {fmt(c.launched_at)}{c.created_by_name ? ` by ${c.created_by_name}` : ''}</>}
-      actions={<div className="flex items-center gap-2"><Badge tone={STATUS_TONE[c.status]} className="text-sm">{c.status}</Badge>
+      actions={<div className="flex items-center gap-2"><CampaignStatusBadge c={c} sent={sent} className="text-sm" />
         {(c.status === 'sending' || c.status === 'scheduled') && <Button size="sm" onClick={() => act.mutate('pause')}><Pause className="size-4" />Pause</Button>}
         {c.status === 'paused' && <Button size="sm" onClick={() => act.mutate('resume')}><Play className="size-4" />Resume</Button>}
         {['sending', 'scheduled', 'paused'].includes(c.status) && <Button size="sm" variant="ghost" onClick={() => confirmAction('Messages not yet sent are dropped and their credits refunded.', () => act.mutateAsync('cancel'), { title: 'Cancel this campaign?', confirmLabel: 'Cancel campaign', success: 'Campaign cancelled' })}><XCircle className="size-4" />Cancel</Button>}</div>}>
